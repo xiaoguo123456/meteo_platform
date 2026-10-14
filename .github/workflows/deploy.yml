@@ -1,0 +1,76 @@
+name: 部署晴川观象
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: 晴川观象生产部署
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: 构建并部署到单机服务器
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 配置 SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -eu
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_KEY"
+          : "${DEPLOY_PORT:=22}"
+          : "${DEPLOY_PATH:=/opt/qingchuan}"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: 打包部署文件
+        run: |
+          tar --exclude='./.git' \
+              --exclude='./.github' \
+              --exclude='./backend/.env.news' \
+              --exclude='./backend/.venv' \
+              --exclude='./frontend/node_modules' \
+              --exclude='./frontend/dist' \
+              --exclude='./data' \
+              -czf /tmp/qingchuan-release.tgz .
+
+      - name: 上传并重建晴川观象
+        run: |
+          set -eu
+          : "${DEPLOY_PORT:=22}"
+          : "${DEPLOY_PATH:=/opt/qingchuan}"
+          scp -i ~/.ssh/deploy_key -P "$DEPLOY_PORT" /tmp/qingchuan-release.tgz "$DEPLOY_USER@$DEPLOY_HOST:/tmp/qingchuan-release.tgz"
+          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "DEPLOY_PATH='$DEPLOY_PATH' bash -se" <<'EOF'
+          set -eu
+          install -d "$DEPLOY_PATH"
+          tar --no-overwrite-dir -xzf /tmp/qingchuan-release.tgz -C "$DEPLOY_PATH"
+          cd "$DEPLOY_PATH"
+          docker compose -f deploy/compose.yml up -d --build backend news-worker frontend
+          # 后端重建后刷新 Nginx 的 Docker 上游地址，避免保留旧容器 IP。
+          docker compose -f deploy/compose.yml up -d --force-recreate frontend
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 3 http://127.0.0.1:8091/api/health >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS --max-time 5 http://127.0.0.1:8091/api/health >/dev/null
+          docker compose -f deploy/compose.yml ps
+          EOF
+
+      - name: 清理临时密钥
+        if: always()
+        run: rm -f ~/.ssh/deploy_key /tmp/qingchuan-release.tgz

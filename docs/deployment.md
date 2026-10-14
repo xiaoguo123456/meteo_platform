@@ -46,3 +46,20 @@ S3 预缓存增加 `.v2.gz` 浏览器响应文件：保留原始浮点值的字�
 ## 按视野分块版本
 
 当前前端使用 `/api/tiles`，128×128 原始数值块按视野流式传输，后台预生成 `.v3.blocks` 和 `.v3.json`；保留旧接口兼容。当前最多 8 帧动画先缓冲后连续循环。设计、来源和适用边界见 `viewport-streaming.md`。旧 `.v2.gz` 随整个批次保留策略清理，不操作 Open-Meteo 数据卷。
+## GitHub Actions 自动部署
+
+仓库的 `main` 分支每次推送后会触发 `.github/workflows/deploy.yml`。Actions 只更新 `/opt/qingchuan` 下的晴川观象服务，执行 `deploy/compose.yml`，不会操作独立的 Open-Meteo Compose 项目。
+
+在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 中配置以下 Secrets：
+
+| Secret | 值 |
+|---|---|
+| `DEPLOY_HOST` | `192.236.166.152` |
+| `DEPLOY_USER` | `root` |
+| `DEPLOY_PORT` | `22` |
+| `DEPLOY_PATH` | `/opt/qingchuan` |
+| `DEPLOY_SSH_KEY` | 服务器端 `~/.ssh/meteo-github-actions` 对应的完整私钥内容 |
+
+公钥需要提前加入服务器 `/root/.ssh/authorized_keys`。私钥只进入 GitHub Actions Secret，不提交到仓库。部署包会排除 `backend/.env.news`、`data`、本地虚拟环境和构建产物，服务器上已有的模型缓存、资讯数据库和模型密钥会保留。
+
+部署完成后流程会等待 `http://127.0.0.1:8091/api/health` 返回成功，并输出晴川观象三个容器状态。Open-Meteo 服务使用独立 Compose 项目，不会被这条流程重启。
