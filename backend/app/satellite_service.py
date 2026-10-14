@@ -49,6 +49,9 @@ def save_mosaic(time, tiles, product='truecolor'):
         with Image.open(io.BytesIO(body)) as tile:
             if tile.size!=(256,256):raise ValueError('卫星瓦片尺寸发生变化')
             image.paste(tile.convert('RGBA'),(x*256,y*256))
+    # 真彩色在本地夜间会返回全黑/空白帧，不发布这种帧，否则前端会看到整块黑图。
+    if tiles and image.convert('RGB').getbbox() is None:
+        raise ValueError('当前卫星真彩色没有可见光影像')
     temporary=root/f'{time}.part';image.save(temporary,format='WEBP',lossless=True,method=3);temporary.replace(root/f'{time}.webp')
     save_display(time,product)
 
@@ -59,6 +62,14 @@ def save_display(time,product):
         temporary=root/f'{time}.display.part'
         image.save(temporary,format='WEBP',quality=90,method=4)
         temporary.replace(root/f'{time}.display.webp')
+
+
+def has_signal(path):
+    try:
+        with Image.open(path) as image:
+            return image.convert('RGB').getbbox() is not None
+    except Exception:
+        return False
 
 
 async def sync_satellite():
@@ -78,7 +89,11 @@ async def sync_satellite():
         for t in reversed(times):
             for product in PRODUCTS:
                 if product in failed:continue
-                if (product_root(product)/f'{t}.webp').exists():
+                existing = product_root(product)/f'{t}.webp'
+                if existing.exists() and not has_signal(existing):
+                    existing.unlink(missing_ok=True)
+                    (product_root(product)/f'{t}.display.webp').unlink(missing_ok=True)
+                if existing.exists():
                     if not (product_root(product)/f'{t}.display.webp').exists():
                         await asyncio.to_thread(save_display,t,product)
                     continue
