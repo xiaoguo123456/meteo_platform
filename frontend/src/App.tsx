@@ -94,7 +94,6 @@ function WeatherApp({satelliteMode}:{satelliteMode:boolean}) {
    <div className="run-readout">起报 {formatTime(run)} · 北京时间{batch?.state==='syncing'&&<span>缓存 {batch.times.length}/{batch.total}</span>}</div>
    <div className="timeline"><button aria-label={playing?'暂停预报播放':'播放预报'} disabled={!activeBatch||times.length<2||!!error} onClick={()=>{if(playing){setPlaying(false);return;}if(index>=times.length-1)setIndex(0);setWaiting(false);setPlaying(true);}}>{playing?'Ⅱ':'▶'}</button><input aria-label="预报时间" type="range" min="0" max={Math.max(0,(times.length||1)-1)} value={index} disabled={!times.length} onChange={e=>{setPlaying(false);setIndex(Number(e.target.value));}}/></div>
    <div className="timeline-labels"><span>{formatTime(times[0])}</span><span>{formatTime(times[times.length-1])}</span></div>
-   {playing&&<div className="run-readout">{waiting?'正在缓冲下一时刻…':`播放 ${index+1}/${times.length}`}</div>}
    <div className="panel-divider"/><div className="forecast-readout"><strong>{time}</strong><span>北京时间</span></div>
    {grid&&<div className="wind-legend"><div style={{background:gradient}}/>{ticks.map((n,i)=><span key={n} style={{position:'absolute',left:`${i*25}%`,transform:i===0?undefined:i===4?'translateX(-100%)':'translateX(-50%)'}}>{n}{i===4?` ${spec.unit}`:''}</span>)}</div>}
 
