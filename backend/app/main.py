@@ -4,8 +4,9 @@ from contextlib import asynccontextmanager, suppress
 from .forecast_cache import sync_loop, read_status, cached_field, cached_response, STOP
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
@@ -15,7 +16,7 @@ from .schemas import BoundaryCollection, FieldManifest, ModelSummary
 from .satellite_service import latest_himawari, satellite_loop
 from .spatial_provider import SpatialDataError
 from .weather_service import WeatherDataError, get_weather_grid, get_weather_particles
-from .site_forecast import forecast as site_forecast, list_stations, satellite_radiation
+from .site_forecast import SiteCreate, create_station, forecast as site_forecast, list_stations, satellite_radiation
 
 
 settings = get_settings()
@@ -59,9 +60,22 @@ def variables() -> list[dict[str, str]]:
 
 
 @app.get("/api/site-stations")
-def site_stations() -> list[dict[str, object]]:
+def site_stations(
+    keyword: str = Query(default="", max_length=80),
+    type: Optional[str] = Query(default=None, pattern="^(wind|solar)$"),
+    province: str = Query(default="", max_length=32),
+    sort: str = Query(default="capacity", pattern="^(capacity|name)$"),
+    limit: int = Query(default=60, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
     """EnerSight 风格的公开站点目录，站点预测不需要登录。"""
-    return list_stations()
+    return list_stations(keyword=keyword, type_=type, province=province, sort=sort, limit=limit, offset=offset)
+
+
+@app.post("/api/site-stations")
+def create_site_station(payload: SiteCreate) -> dict[str, object]:
+    """新增自定义场站，数据保存在服务端 data 目录。"""
+    return create_station(payload)
 
 
 @app.get("/api/site-forecast")
