@@ -77,6 +77,13 @@ async def sync_satellite():
     async with httpx.AsyncClient(timeout=25,follow_redirects=True) as client:
         response=await client.get(TARGET_TIMES_URL);response.raise_for_status()
         times=sorted({v['basetime'] for v in response.json() if re.fullmatch(r'\d{14}',v['basetime'])})[-KEEP:]
+        for product in PRODUCTS:
+            for existing in product_root(product).glob('*.webp'):
+                if existing.name.endswith('.display.webp'):
+                    continue
+                if not has_signal(existing):
+                    existing.unlink(missing_ok=True)
+                    existing.with_name(f'{existing.stem}.display.webp').unlink(missing_ok=True)
         semaphore=asyncio.Semaphore(8)
         async def tile(t,x,y,product):
             async with semaphore:
