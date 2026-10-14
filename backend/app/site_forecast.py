@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -25,6 +26,9 @@ MODEL_PARAMS = {
     "aifs": {"name": "AIFS", "models": "ecmwf_aifs025"},
     "grapes": {"name": "GRAPES", "models": "cma_grapes_global"},
 }
+
+_SATELLITE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_SATELLITE_CACHE_TTL = 300.0
 
 
 def list_stations() -> list[dict[str, Any]]:
@@ -58,7 +62,7 @@ def _power(station: dict[str, Any], wind: float | None, radiation: float | None,
 
 
 def _iso(value: str | None) -> str | None:
-    return value.replace(" ", "T") if value else None
+    return value.replace(" ", "T") + "+08:00" if value else None
 
 
 def _satellite_latest(raw: dict[str, Any]) -> dict[str, Any]:
@@ -72,16 +76,16 @@ def _satellite_latest(raw: dict[str, Any]) -> dict[str, Any]:
     for i, value_time in enumerate(times):
         value = ghi[i] if i < len(ghi) else None
         item = {
-            "time": f"{_iso(value_time)}Z" if _iso(value_time) else None,
+            "time": value_time.replace(" ", "T") + "Z",
             "ghi_w_m2": value,
             "direct_w_m2": direct[i] if i < len(direct) else None,
             "diffuse_w_m2": diffuse[i] if i < len(diffuse) else None,
         }
-        series.append(item)
         if value is not None:
+            series.append(item)
             latest = item
     if latest is None:
-        return {"status": "unavailable", "source": "JAXA / P-Tree 葵花卫星", "series": series[-36:]}
+        return {"status": "unavailable", "source": "JAXA / P-Tree 葵花卫星", "series": series}
     return {
         "status": "ok",
         "source": "JAXA / P-Tree 葵花卫星",
@@ -89,7 +93,7 @@ def _satellite_latest(raw: dict[str, Any]) -> dict[str, Any]:
         "ghi_w_m2": latest["ghi_w_m2"],
         "direct_w_m2": latest["direct_w_m2"],
         "diffuse_w_m2": latest["diffuse_w_m2"],
-        "series": series[-36:],
+        "series": series,
     }
 
 
@@ -104,6 +108,7 @@ async def forecast(station_id: str, model: str = "gfs", include_satellite: bool 
         "longitude": station["longitude"],
         "models": params["models"],
         "forecast_days": 7,
+        "wind_speed_unit": "ms",
         "timezone": "Asia/Shanghai",
         "current": "temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,cloud_cover,precipitation,shortwave_radiation",
         "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,cloud_cover,precipitation,shortwave_radiation",
@@ -203,7 +208,7 @@ async def forecast(station_id: str, model: str = "gfs", include_satellite: bool 
             "power_kw": _power(station, current.get("wind_speed_10m"), current.get("shortwave_radiation"), current.get("cloud_cover")),
         },
         "satellite": satellite,
-        "hourly": hourly[:72],
+        "hourly": hourly,
         "days": days,
     }
 
@@ -213,6 +218,9 @@ async def satellite_radiation(station_id: str) -> dict[str, Any]:
     station = _station(station_id)
     if station["type"] != "solar":
         return {"status": "not_applicable", "source": "JAXA / P-Tree 葵花卫星", "series": []}
+    cached = _SATELLITE_CACHE.get(station_id)
+    if cached and time.monotonic() - cached[0] < _SATELLITE_CACHE_TTL:
+        return cached[1]
     settings = get_settings()
     base = settings.open_meteo_satellite_base_url or settings.open_meteo_base_url.replace("/forecast", "/archive")
     now = datetime.now(timezone.utc)
@@ -230,4 +238,6 @@ async def satellite_radiation(station_id: str) -> dict[str, Any]:
         response = await client.get(base, params=query)
     if response.status_code >= 400:
         raise RuntimeError(f"自部署 Open-Meteo 卫星接口返回 {response.status_code}")
-    return _satellite_latest(response.json())
+    result = _satellite_latest(response.json())
+    _SATELLITE_CACHE[station_id] = (time.monotonic(), result)
+    return result
