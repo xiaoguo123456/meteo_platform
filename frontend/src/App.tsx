@@ -1,4 +1,5 @@
 import NewsPage from './NewsPage';
+import StationForecast from './StationForecast';
 import SatellitePanel, {warmSatellite} from './SatellitePanel';
 import type {EarthTexture} from './basemap';
 import { useEffect, useState, useRef } from 'react';
@@ -102,8 +103,8 @@ function WeatherApp({satelliteMode}:{satelliteMode:boolean}) {
 }
 
 export default function App(){
- const getMode=()=>location.hash.startsWith('#news')?'news':location.hash==='#satellite'?'satellite':'home';
+ const getMode=()=>location.hash.startsWith('#news')?'news':location.hash==='#station'?'station':location.hash==='#satellite'?'satellite':'home';
  const [mode,setMode]=useState(getMode);
  useEffect(()=>{const changed=()=>setMode(getMode());addEventListener('hashchange',changed);return()=>removeEventListener('hashchange',changed);},[]);
- return <><header className="topbar"><span className="brand-name">晴川观象</span><nav aria-label="主导航">{[['home','首页'],['satellite','葵花卫星'],['news','资讯']].map(([id,title])=><button key={id} className={`nav-item ${mode===id?'nav-item-active':''}`} onClick={()=>{location.hash=id==='home'?'':id;setMode(id);}}>{title}</button>)}</nav></header>{mode==='news'?<NewsPage/>:<WeatherApp satelliteMode={mode==='satellite'}/>}</>;
+ return <><header className="topbar"><span className="brand-name">晴川观象</span><nav aria-label="主导航">{[['home','首页'],['satellite','葵花卫星'],['station','站点预测'],['news','资讯']].map(([id,title])=><button key={id} className={`nav-item ${mode===id?'nav-item-active':''}`} onClick={()=>{location.hash=id==='home'?'':id;setMode(id);}}>{title}</button>)}</nav></header>{mode==='news'?<NewsPage/>:mode==='station'?<StationForecast/>:<WeatherApp satelliteMode={mode==='satellite'}/>}</>;
 }

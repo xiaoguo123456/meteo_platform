@@ -4,6 +4,7 @@ services:
     build: ../backend
     restart: unless-stopped
     environment:
+      METEO_OPEN_METEO_BASE_URL: http://host.docker.internal:8090/v1/forecast
       WEATHER_FORECAST_CACHE: /data/forecasts
       WEATHER_DOWNLOAD_CONCURRENCY: "4"
       WEATHER_S3_BLOCK_SIZE: "262144"
@@ -11,6 +12,8 @@ services:
       METEO_DATA_DIR: /data
       NEWS_DATA_DIR: /data/news
       OPENBLAS_NUM_THREADS: "1"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ../data:/data
     mem_limit: 1200m

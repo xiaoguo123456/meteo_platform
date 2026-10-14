@@ -1,4 +1,5 @@
 import asyncio
+import httpx
 from contextlib import asynccontextmanager, suppress
 from .forecast_cache import sync_loop, read_status, cached_field, cached_response, STOP
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ from .schemas import BoundaryCollection, FieldManifest, ModelSummary
 from .satellite_service import latest_himawari, satellite_loop
 from .spatial_provider import SpatialDataError
 from .weather_service import WeatherDataError, get_weather_grid, get_weather_particles
+from .site_forecast import forecast as site_forecast, list_stations
 
 
 settings = get_settings()
@@ -54,6 +56,20 @@ def models() -> list[dict[str, str]]:
 @app.get("/api/variables")
 def variables() -> list[dict[str, str]]:
     return VARIABLE_CATALOG
+
+
+@app.get("/api/site-stations")
+def site_stations() -> list[dict[str, object]]:
+    """EnerSight 风格的公开站点目录，站点预测不需要登录。"""
+    return list_stations()
+
+
+@app.get("/api/site-forecast")
+async def site_forecast_data(station_id: str = "zhangbei-wind", model: str = "gfs") -> dict[str, object]:
+    try:
+        return await site_forecast(station_id, model)
+    except (ValueError, RuntimeError, httpx.HTTPError) as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
 
 
 @app.get("/api/models/{model_id}/runs")
