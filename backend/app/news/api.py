@@ -1,4 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import HTMLResponse
+import httpx
+from urllib.parse import urlparse
 from .store import db, initialize, public_article, public_policy, CHANNELS
 router=APIRouter(prefix='/api/news')
 
@@ -63,3 +66,37 @@ def policy(policy_id:str):
         row=c.execute('SELECT * FROM policy_documents WHERE id=?',(policy_id,)).fetchone()
     if not row:raise HTTPException(404,'政策资料不存在')
     return public_policy(row,True)
+
+
+@router.get('/policies/{policy_id}/preview', response_class=HTMLResponse)
+def policy_preview(policy_id: str):
+    """为官方 HTML 资料补充 viewport 和窄屏样式；PDF 仍由浏览器原生预览。"""
+    initialize()
+    with db() as c:
+        row=c.execute('SELECT preview_url FROM policy_documents WHERE id=?',(policy_id,)).fetchone()
+    if not row or not row['preview_url']:
+        raise HTTPException(404,'预览地址不存在')
+    source=row['preview_url']
+    parsed=urlparse(source)
+    if parsed.scheme not in {'http','https'} or not (parsed.hostname or '').endswith('nea.gov.cn'):
+        raise HTTPException(400,'预览来源不在允许范围内')
+    if parsed.path.lower().endswith('.pdf'):
+        raise HTTPException(400,'PDF 请直接使用附件地址预览')
+    try:
+        response=httpx.get(source,timeout=15,follow_redirects=True,headers={'User-Agent':'Qingchuan-Preview/1.0'})
+        response.raise_for_status()
+    except httpx.HTTPError as error:
+        raise HTTPException(502,f'官方页面读取失败：{error}') from error
+    html=response.text
+    base=f'<base href="{source}">'
+    style='''<style>
+      html,body{width:100%!important;min-width:0!important;margin:0!important;overflow-x:hidden!important}
+      *,*:before,*:after{box-sizing:border-box!important;max-width:100%!important}
+      img,video,iframe{height:auto!important}
+      table{width:100%!important;table-layout:auto!important}
+      pre{white-space:pre-wrap!important;word-break:break-word!important}
+    </style>'''
+    lower=html.lower()
+    index=lower.find('</head>')
+    html=html[:index]+base+style+html[index:] if index >= 0 else base+style+html
+    return HTMLResponse(html,headers={'Cache-Control':'public, max-age=300'})
