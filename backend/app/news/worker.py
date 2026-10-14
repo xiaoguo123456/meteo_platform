@@ -65,9 +65,11 @@ async def enrich_policies_once():
     if not rows:return
     async with httpx.AsyncClient(timeout=httpx.Timeout(30),headers={'User-Agent':'QingchuanNews/1.0'},follow_redirects=False) as client:
         fetcher=Fetcher(client)
-        for row in rows:
-            await summarize_policy(client,row,fetcher)
-            await asyncio.sleep(.5)
+        semaphore=asyncio.Semaphore(3)
+        async def run(row):
+            async with semaphore:
+                return await summarize_policy(client,row,fetcher)
+        await asyncio.gather(*(run(row) for row in rows))
 
 async def policy_loop():
     while True:
