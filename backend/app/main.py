@@ -1,16 +1,37 @@
+import asyncio
+from contextlib import asynccontextmanager, suppress
+from .forecast_cache import sync_loop, read_status, cached_field, cached_response, STOP
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from .catalog import MODEL_CATALOG, VARIABLE_CATALOG
 from .config import get_settings
 from .schemas import BoundaryCollection, FieldManifest, ModelSummary
+from .satellite_service import latest_himawari, satellite_loop
+from .spatial_provider import SpatialDataError
+from .weather_service import WeatherDataError, get_weather_grid, get_weather_particles
 
 
 settings = get_settings()
-app = FastAPI(title=settings.app_name, version="0.1.0")
+@asynccontextmanager
+async def lifespan(app):
+    task = asyncio.create_task(sync_loop())
+    satellite_task = asyncio.create_task(satellite_loop())
+    yield
+    STOP.set()
+    task.cancel()
+    satellite_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await satellite_task
+    with suppress(asyncio.CancelledError):
+        await task
+
+app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -37,11 +58,46 @@ def variables() -> list[dict[str, str]]:
 
 @app.get("/api/models/{model_id}/runs")
 def model_runs(model_id: str) -> dict[str, object]:
-    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    return {
-        "model": model_id,
-        "runs": [now.isoformat(), (now.replace(hour=(now.hour - 6) % 24)).isoformat()],
-    }
+    try:
+        return read_status(model_id)
+    except SpatialDataError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+@app.get("/api/fields/{model_id}")
+async def weather_grid(model_id: str, hours: int = 48, refresh: bool = False) -> dict[str, object]:
+    try:
+        return await get_weather_grid(model_id, hours=hours, force_refresh=refresh)
+    except (SpatialDataError, WeatherDataError, ValueError) as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+@app.get("/api/fields/{model_id}/particles")
+async def weather_particles(model_id: str, hours: int = 48, max_points: int = 6000, refresh: bool = False) -> dict[str, object]:
+    try:
+        return await get_weather_particles(model_id, hours=hours, max_points=max_points, force_refresh=refresh)
+    except (SpatialDataError, WeatherDataError, ValueError) as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+@app.get("/api/wind/{model_id}")
+async def native_wind(request: Request, model_id: str, field: str = "wind", run_time: str = None, valid_time: str = None, format: str = "raw"):
+    from fastapi.responses import Response
+    from fastapi.responses import FileResponse
+    try:
+        if format == 'packed':
+            path = await asyncio.to_thread(cached_response, model_id, field, run_time, valid_time)
+            headers = {"Vary": "Accept-Encoding", "Cache-Control": "public, max-age=31536000, immutable" if run_time and valid_time else "no-cache"}
+            if 'gzip' in request.headers.get('accept-encoding', ''):
+                headers['Content-Encoding'] = 'gzip'
+                return FileResponse(path, media_type='application/octet-stream', headers=headers)
+            import gzip
+            body = await asyncio.to_thread(lambda: gzip.decompress(path.read_bytes()))
+            return Response(body, media_type='application/octet-stream', headers=headers)
+        return Response(await asyncio.to_thread(cached_field, model_id, field, run_time, valid_time), media_type="application/octet-stream",
+                        headers={"Cache-Control": "no-cache"})
+    except SpatialDataError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
 
 
 @app.get("/api/fields/{model_id}/{valid_time}", response_model=FieldManifest)
@@ -59,11 +115,48 @@ def field_manifest(model_id: str, valid_time: str) -> FieldManifest:
     )
 
 
-@app.get("/api/boundaries/provinces", response_model=BoundaryCollection)
-def province_boundaries() -> BoundaryCollection:
-    boundary_path = Path(__file__).resolve().parents[2] / "data" / "boundaries" / "provinces.geojson"
-    if boundary_path.exists():
-        import json
+@app.get("/api/satellite/himawari/latest")
+async def himawari_latest(product: str = 'truecolor') -> dict[str, object]:
+    try:return await latest_himawari(product)
+    except ValueError as error:raise HTTPException(status_code=400, detail=str(error)) from error
 
-        return BoundaryCollection.model_validate(json.loads(boundary_path.read_text(encoding="utf-8")))
-    return BoundaryCollection(type="FeatureCollection", features=[])
+
+@app.get('/api/boundaries/provinces')
+def province_boundaries():
+    from fastapi.responses import FileResponse
+    return FileResponse(Path(__file__).parent/'data/provinces.geojson', media_type='application/geo+json',
+                        headers={'Cache-Control':'public, max-age=86400'})
+
+@app.get('/api/tiles/{model_id}')
+async def native_tiles(model_id: str, field: str, run_time: str, valid_time: str, tiles: str, version: int = 3):
+    from .tile_cache import cached_tiles
+    from fastapi.responses import StreamingResponse
+    try:
+        ids = [int(value) for value in tiles.split(',')]
+        stream, length = await asyncio.to_thread(cached_tiles, model_id, field, run_time, valid_time, ids, version)
+        return StreamingResponse(stream, media_type='application/octet-stream', headers={
+            'Content-Length': str(length), 'Cache-Control':'public, max-age=31536000, immutable',
+            # 分块内部已 gzip，禁止中间件再次压缩，保持逐块到达。
+            'Content-Encoding':'identity', 'X-Accel-Buffering':'no'})
+    except (ValueError, SpatialDataError) as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+@app.get('/api/point/{model_id}')
+async def point_series(model_id: str, longitude: float, latitude: float, field: str = 'temperature', run_time: str = None):
+    from .point_forecast import point_forecast
+    try:
+        return await asyncio.to_thread(point_forecast, model_id, field, longitude, latitude, run_time)
+    except (ValueError, SpatialDataError, OSError, KeyError) as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+@app.get('/api/satellite/himawari/images/{product}/{time}.display.webp')
+async def satellite_image(product: str, time: str):
+    from .satellite_service import display_path
+    from fastapi.responses import FileResponse
+    try:
+        return FileResponse(display_path(time,product), media_type='image/webp', headers={'Cache-Control':'public, max-age=86400, immutable','Content-Encoding':'identity'})
+    except (ValueError, FileNotFoundError) as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+from .news.api import router as news_router
+app.include_router(news_router)

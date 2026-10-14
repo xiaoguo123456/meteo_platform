@@ -1,0 +1,63 @@
+name: qingchuan
+services:
+  backend:
+    build: ../backend
+    restart: unless-stopped
+    environment:
+      WEATHER_FORECAST_CACHE: /data/forecasts
+      WEATHER_DOWNLOAD_CONCURRENCY: "4"
+      WEATHER_S3_BLOCK_SIZE: "262144"
+      WEATHER_POLL_SECONDS: "300"
+      METEO_DATA_DIR: /data
+      NEWS_DATA_DIR: /data/news
+      OPENBLAS_NUM_THREADS: "1"
+    volumes:
+      - ../data:/data
+    mem_limit: 1200m
+    cpus: "1.25"
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+  frontend:
+    build: ../frontend
+    restart: unless-stopped
+    ports:
+      - "8091:80"
+    depends_on:
+      backend: {condition: service_healthy}
+    mem_limit: 128m
+    cpus: "0.25"
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  news-worker:
+    build: ../backend
+    restart: unless-stopped
+    command: ["python", "-m", "app.news.worker"]
+    env_file:
+      - ../backend/.env.news
+    environment:
+      NEWS_DATA_DIR: /data/news
+      NEWS_SOURCE_BATCH: "12"
+      OPENBLAS_NUM_THREADS: "1"
+    volumes:
+      - ../data:/data
+    mem_limit: 512m
+    cpus: "0.40"
+    pids_limit: 64
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}

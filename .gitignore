@@ -11,3 +11,5 @@ dist/
 *.tsbuildinfo
 data/*
 !data/.gitkeep
+
+.env.news

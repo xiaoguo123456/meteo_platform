@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import { decodeFrame } from '../src/frameLoader';
+const meta={width:2,height:2,channels:1,encoding:'palette-u16-le',palette_size:3};
+const header=new TextEncoder().encode(JSON.stringify(meta));const size=Math.ceil(header.length/4)*4;
+const buffer=new ArrayBuffer(4+size+12+8);new DataView(buffer).setUint32(0,size,true);
+const bytes=new Uint8Array(buffer);bytes.fill(32,4,4+size);bytes.set(header,4);
+new Float32Array(buffer,4+size,3).set([-12.5,0,NaN]);new Uint16Array(buffer,4+size+12,4).set([0,1,2,0]);
+const grid=decodeFrame(buffer);assert.deepEqual([...grid.u],[-12.5,0,NaN,-12.5]);assert.deepEqual([...grid.v],[0,0,0,0]);
+new Uint16Array(buffer,4+size+12,4)[0]=99;assert.throws(()=>decodeFrame(buffer),/编码损坏/);
+console.log('通过：无损字典解码、缺测值、标量单通道与损坏检测');
+const deltaMeta={width:3,height:2,channels:2,encoding:'palette-delta-u16-le',palette_size:3};
+const dh=new TextEncoder().encode(JSON.stringify(deltaMeta)),ds=Math.ceil(dh.length/4)*4;
+const db=new ArrayBuffer(4+ds+12+24);new DataView(db).setUint32(0,ds,true);new Uint8Array(db).fill(32,4,4+ds);new Uint8Array(db).set(dh,4);
+new Float32Array(db,4+ds,3).set([-7.25,4.5,NaN]);
+new Uint16Array(db,4+ds+12,12).set([2,65534,1,1,65535,2,0,2,65535,2,65535,65535]);
+const dg=decodeFrame(db);assert.deepEqual([...dg.u],[NaN,-7.25,4.5,4.5,-7.25,NaN]);assert.deepEqual([...dg.v],[-7.25,NaN,4.5,NaN,4.5,-7.25]);
+console.log('通过：差分回绕、逐行重置、多通道及缺测值完全还原');

@@ -9,12 +9,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "d3-geo": "^3.1.1",
     "globe.gl": "^2.37.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "three": "^0.186.0",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@types/d3-geo": "^3.1.1",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",

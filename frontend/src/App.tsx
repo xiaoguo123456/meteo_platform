@@ -1,178 +1,110 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import Globe from "globe.gl";
+import NewsPage from './NewsPage';
+import SatellitePanel, {warmSatellite} from './SatellitePanel';
+import type {EarthTexture} from './basemap';
+import { useEffect, useState, useRef } from 'react';
+import PointForecast from './PointForecast';
+import WeatherGlobe from './WeatherGlobe';
+import { ESRI_CREDIT } from './basemap';
+import { cancelPendingFrames, loadFrame } from './frameLoader';
+import type { Viewport } from './viewTiles';
+import { fields, type Grid } from './windMath';
 
-type Model = {
-  id: string;
-  name: string;
-  provider: string;
-  resolution: string;
-  step: string;
-  status: string;
-};
+type Batch={model:string;run_time:string|null;times:string[];field_times?:Record<string,string[]>;total:number;state:string;error:string|null};
+const formatTime=(iso:string|null|undefined)=>iso?new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(iso)).replace(/\//g,'-'):'—';
+function WeatherApp({satelliteMode}:{satelliteMode:boolean}) {
+ const playbackWait=useRef(0);
+ const [satellite,setSatellite]=useState<EarthTexture|null>(null);
+ const [point,setPoint]=useState<[number,number]|null>(null);
+ const [model,setModel]=useState('gfs'),[grid,setGrid]=useState<Grid|null>(null),[field,setField]=useState('wind'),[loading,setLoading]=useState(true),[error,setError]=useState('');
+ const [viewport,setViewport]=useState<Viewport|null>(null),[waiting,setWaiting]=useState(false);
+ const [batch,setBatch]=useState<Batch|null>(null),[index,setIndex]=useState(0),[playing,setPlaying]=useState(false),[syncError,setSyncError]=useState('');
+ useEffect(()=>{const timer=setTimeout(()=>void warmSatellite(),3000);return()=>clearTimeout(timer);},[]);
+ useEffect(()=>{
+  let active=true;const abort=new AbortController();setBatch(null);setIndex(0);setPlaying(false);setSyncError('');
+  const poll=async()=>{try{
+   const response=await fetch(`/api/models/${model}/runs`,{signal:abort.signal});const body=await response.json();
+   if(!response.ok)throw new Error(body.detail);
+   if(active){setBatch(previous=>{if(previous?.run_time!==body.run_time){setIndex(0);setPlaying(false);}return body;});setSyncError(body.error||'');}
+  }catch(e){if(active)setSyncError(e instanceof Error?e.message:'起报清单读取失败');}};
+  void poll();const timer=setInterval(poll,10000);return()=>{active=false;abort.abort();clearInterval(timer);};
+ },[model]);
+ const activeBatch=batch?.model===model?batch:null;
+ const times=activeBatch?.field_times?.[field] ?? activeBatch?.times ?? [];
+ const availableFields=Object.keys(fields).filter(id=>(activeBatch?.field_times?.[id]?.length??0)>0);
+ useEffect(()=>{if(availableFields.length&&!availableFields.includes(field)){setField(availableFields[0]);setIndex(0);}},[field,availableFields.join(',')]);
+ const run=activeBatch?.run_time, valid=times[index];
+ useEffect(()=>{
+  let active=true;setError('');
+  if(satelliteMode||!viewport)return;
+  if(!run||!valid){if(activeBatch?.state==='ready')setGrid(null);setLoading(false);return;}
+  setLoading(true);const requestedAt=performance.now(),waitMs=playbackWait.current;playbackWait.current=0;
+  loadFrame(model,field,run,valid,viewport,false,data=>{if(active)setGrid(data);}).then(data=>{if(active)setGrid({...data,meta:{...data.meta,requestedAt,waitMs}});}).catch(e=>{if(active){setError(e.message);setPlaying(false);}}).finally(()=>{if(active)setLoading(false);});
+  return()=>{active=false;};
+ },[model,field,run,valid,viewport,activeBatch?.state,satelliteMode]);
+ // 只在视野或数据上下文变化时取消请求，播放推进不能打断后续帧预取。
+ useEffect(()=>{setPlaying(false);setWaiting(false);return()=>cancelPendingFrames();},[viewport,model,field,run,satelliteMode]);
+ useEffect(()=>{
+  if(satelliteMode||!viewport||loading||!run||!grid||grid.meta.model!==model||grid.meta.field!==field)return;
+  let active=true;
+  const timer=setTimeout(()=>{void(async()=>{
+   const ahead=times.slice(index+1,index+7).map(time=>({field,time}));
+   // 静止浏览时提前备好其他要素的首帧；播放时把带宽留给后续时刻。
+   const alternatives=playing?[]:availableFields.filter(id=>id!==field).map(id=>({field:id,time:activeBatch?.field_times?.[id]?.[0]})).filter(item=>item.time);
+   const queue=[...ahead.slice(0,1),...alternatives,...ahead.slice(1)];
+   let cursor=0;
+   const consume=async()=>{while(active&&cursor<queue.length){
+    const item=queue[cursor++];
+    await loadFrame(model,item.field,run,item.time!,viewport,true);
+   }};
+   await Promise.all([consume(),consume()]);
+  })().catch(()=>{/* 预取失败由前台读取时显示，不能填充替代数据。 */});},100);
+  return()=>{active=false;clearTimeout(timer);};
+ },[viewport,loading,grid,index,run,model,field,times.length,satelliteMode,playing,availableFields.join(',')]);
+ useEffect(()=>{
+  if(!playing||loading||!grid||!viewport||!run)return;
+  if(index>=times.length-1){
+   if(activeBatch?.state==='ready')setPlaying(false);
+   else setWaiting(true);
+   return;
+  }
+  let active=true;
+  const timer=setTimeout(()=>{
+   setWaiting(true);const waitStarted=performance.now();
+   void loadFrame(model,field,run,times[index+1],viewport,true).then(()=>{
+    if(active){playbackWait.current=performance.now()-waitStarted;setWaiting(false);setIndex(index+1);}
+   }).catch(e=>{if(active){setError(e.message);setPlaying(false);setWaiting(false);}});
+  },1500);
+  return()=>{active=false;clearTimeout(timer);};
+ },[playing,loading,grid,index,viewport,run,model,field,times.length,activeBatch?.state]);
+ const spec=fields[grid?.meta.field||field];
+ const ticks=Array.from({length:5},(_,i)=>spec.min+(spec.max-spec.min)*i/4);
+ const gradient=`linear-gradient(90deg,${spec.colors.map(c=>`rgb(${c.slice(1).join(',')}) ${(c[0]-spec.min)/(spec.max-spec.min)*100}%`).join(',')})`;
+ const time=formatTime(grid?.meta.valid_time);
+ const status=error||syncError||(loading?'正在加载预报…':!times.length?(batch?.state==='ready'?'当前模型未提供该要素数据':'该要素正在提前缓存…'):'');
 
-const fallbackModels: Model[] = [
-  { id: "gfs", name: "GFS", provider: "NOAA / Open-Meteo", resolution: "0.25°", step: "1 小时", status: "ready" },
-  { id: "ifs", name: "IFS", provider: "ECMWF / Open-Meteo", resolution: "0.25°", step: "1 小时", status: "ready" },
-  { id: "aifs", name: "AIFS", provider: "ECMWF / Open-Meteo", resolution: "0.25°", step: "6 小时", status: "preview" },
-  { id: "grapes", name: "GRAPES", provider: "CMA / Open-Meteo", resolution: "0.125°", step: "3 小时", status: "preview" },
-];
+ return <div className="app-shell"><main className="weather-workspace">
+  <WeatherGlobe onPoint={p=>{if(!satelliteMode)setPoint(p);}} satellite={satelliteMode?satellite:null} onViewChange={setViewport} grid={satelliteMode?null:grid} animated={!satelliteMode&&grid?.meta.field==='wind'}/>
+  {!satelliteMode&&point&&run&&availableFields.length>0&&<PointForecast point={point} model={model} run={run} available={availableFields} onClose={()=>setPoint(null)}/>}
 
-const variables = [
-  { id: "wind", label: "风场", unit: "m/s" },
-  { id: "temperature", label: "温度", unit: "°C" },
-  { id: "pressure", label: "气压", unit: "hPa" },
-  { id: "precipitation", label: "降水", unit: "mm" },
-];
+  {!satelliteMode&&status&&<div role="status" className={`load-status ${error||syncError?'error':''}`}>{status}</div>}
+  {satelliteMode?<SatellitePanel onTexture={setSatellite}/>:<aside className="control-panel">
+   <div className="control-line"><span className="control-key">模式</span><div className="choice-row">{['gfs','grapes','ifs','aifs'].map(m=><button key={m} className={`choice ${model===m?'active':''}`} onClick={()=>setModel(m)}>{m.toUpperCase()}</button>)}</div></div>
+   <div className="control-line"><span className="control-key">要素</span><div className="choice-row">{Object.entries(fields).filter(([id])=>availableFields.includes(id)).map(([id,item])=><button key={id} className={`choice ${field===id?'active':''}`} onClick={()=>{setField(id);setIndex(0);setPlaying(false);}}>{item.label}</button>)}</div></div>
+   {grid&&<div className="control-line"><span className="control-key">层次</span><span className="choice">{grid.meta.level}{grid.meta.field==='precipitation'&&grid.meta.interval_start?`（${formatTime(grid.meta.interval_start)}—${formatTime(grid.meta.valid_time)}）`:''}</span></div>}
+   <div className="run-readout">起报 {formatTime(run)} · 北京时间{batch?.state==='syncing'&&<span>缓存 {batch.times.length}/{batch.total}</span>}</div>
+   <div className="timeline"><button aria-label={playing?'暂停预报播放':'播放预报'} disabled={!activeBatch||times.length<2||!!error} onClick={()=>{if(playing){setPlaying(false);return;}if(index>=times.length-1)setIndex(0);setWaiting(false);setPlaying(true);}}>{playing?'Ⅱ':'▶'}</button><input aria-label="预报时间" type="range" min="0" max={Math.max(0,(times.length||1)-1)} value={index} disabled={!times.length} onChange={e=>{setPlaying(false);setIndex(Number(e.target.value));}}/></div>
+   <div className="timeline-labels"><span>{formatTime(times[0])}</span><span>{formatTime(times[times.length-1])}</span></div>
+   {playing&&<div className="run-readout">{waiting?'正在缓冲下一时刻…':`播放 ${index+1}/${times.length}`}</div>}
+   <div className="panel-divider"/><div className="forecast-readout"><strong>{time}</strong><span>北京时间</span></div>
+   {grid&&<div className="wind-legend"><div style={{background:gradient}}/>{ticks.map((n,i)=><span key={n} style={{position:'absolute',left:`${i*25}%`,transform:i===0?undefined:i===4?'translateX(-100%)':'translateX(-50%)'}}>{n}{i===4?` ${spec.unit}`:''}</span>)}</div>}
 
-const forecastSteps = ["现在", "+06h", "+12h", "+18h", "+24h", "+30h", "+36h", "+42h"];
-
-function App() {
-  const globeHostRef = useRef<HTMLDivElement>(null);
-  const globeRef = useRef<any>(null);
-  const [models, setModels] = useState<Model[]>(fallbackModels);
-  const [modelId, setModelId] = useState("gfs");
-  const [variableId, setVariableId] = useState("wind");
-  const [step, setStep] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(true);
-  const [boundaries, setBoundaries] = useState<unknown[]>([]);
-
-  const selectedModel = useMemo(() => models.find((model) => model.id === modelId) ?? fallbackModels[0], [modelId, models]);
-  const selectedVariable = variables.find((variable) => variable.id === variableId) ?? variables[0];
-
-  useEffect(() => {
-    fetch("/api/models")
-      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("模型接口不可用"))))
-      .then((data: Model[]) => setModels(data))
-      .catch(() => setModels(fallbackModels));
-
-    fetch("/api/boundaries/provinces")
-      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("省界接口不可用"))))
-      .then((data) => setBoundaries(data.features ?? []))
-      .catch(() => setBoundaries([]));
-  }, []);
-
-  useEffect(() => {
-    if (!isPlaying) return;
-    const timer = window.setInterval(() => setStep((current) => (current + 1) % forecastSteps.length), 2200);
-    return () => window.clearInterval(timer);
-  }, [isPlaying]);
-
-  useEffect(() => {
-    if (!globeHostRef.current) return;
-    const globe = new Globe(globeHostRef.current, { animateIn: true })
-      .backgroundColor("#05070b")
-      .globeImageUrl("https://unpkg.com/three-globe/example/img/earth-night.jpg")
-      .bumpImageUrl("https://unpkg.com/three-globe/example/img/earth-topology.png")
-      .showAtmosphere(true)
-      .atmosphereColor("#4d8dff")
-      .atmosphereAltitude(0.12)
-      .showGraticules(false)
-      .polygonsData(boundaries)
-      .polygonCapColor(() => "rgba(33, 115, 183, 0.08)")
-      .polygonSideColor(() => "rgba(82, 154, 217, 0.08)")
-      .polygonStrokeColor(() => "rgba(138, 191, 246, 0.7)")
-      .polygonAltitude(0.004)
-      .width(globeHostRef.current.clientWidth)
-      .height(globeHostRef.current.clientHeight);
-
-    globe.controls().autoRotate = true;
-    globe.controls().autoRotateSpeed = 0.18;
-    globeRef.current = globe;
-
-    const resize = () => {
-      if (!globeHostRef.current || !globeRef.current) return;
-      globe.width(globeHostRef.current.clientWidth).height(globeHostRef.current.clientHeight);
-    };
-    window.addEventListener("resize", resize);
-    return () => {
-      window.removeEventListener("resize", resize);
-      globe._destructor?.();
-      globeRef.current = null;
-    };
-  }, [boundaries]);
-
-  return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div className="brand-lockup">
-          <span className="brand-mark" />
-          <span className="brand-name">METEO</span>
-          <span className="brand-divider" />
-          <span className="brand-section">全球天气态势</span>
-        </div>
-        <nav className="top-nav" aria-label="主导航">
-          <button className="nav-item nav-item-active">天气场</button>
-          <button className="nav-item">模型对比</button>
-          <button className="nav-item">卫星云图</button>
-        </nav>
-        <div className="top-status"><span className="status-dot" />系统在线</div>
-      </header>
-
-      <main className="workspace">
-        <section className="globe-stage">
-          <div ref={globeHostRef} className="globe-canvas" />
-          <div className="stage-vignette" />
-          <div className="stage-readout">
-            <div className="readout-live"><span className="readout-pulse" />实时视图</div>
-            <div className="readout-title">{selectedVariable.label}<span>{selectedVariable.unit}</span></div>
-            <div className="readout-meta">{selectedModel.name} · 预报时效 {forecastSteps[step]}</div>
-          </div>
-          <div className="coordinates"><span>经度 116.39°E</span><span>纬度 39.90°N</span></div>
-
-          <aside className="control-panel">
-            <div className="panel-heading"><span>天气场</span><span className="panel-kicker">CONTROL</span></div>
-
-            <div className="control-group">
-              <label className="control-label">数值模型</label>
-              <div className="model-grid">
-                {models.map((model) => (
-                  <button key={model.id} className={`model-button ${model.id === modelId ? "selected" : ""}`} onClick={() => setModelId(model.id)}>
-                    <span>{model.name}</span><small>{model.resolution}</small>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="control-group">
-              <label className="control-label">显示要素</label>
-              <div className="variable-list">
-                {variables.map((variable) => (
-                  <button key={variable.id} className={`variable-button ${variable.id === variableId ? "selected" : ""}`} onClick={() => setVariableId(variable.id)}>
-                    <span className={`variable-swatch swatch-${variable.id}`} />{variable.label}<span className="variable-unit">{variable.unit}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="control-group control-row">
-              <div><label className="control-label">云图叠加</label><span className="control-value">Himawari-9</span></div>
-              <button className="toggle is-on" aria-label="切换云图叠加"><span /></button>
-            </div>
-          </aside>
-        </section>
-
-        <section className="timeline-panel">
-          <div className="timeline-topline">
-            <div><span className="timeline-caption">预报时间</span><strong>2026 / 10 / 12</strong></div>
-            <div className="timeline-model"><span className="model-badge">{selectedModel.name}</span><span>运行时间 12Z</span></div>
-            <div className="timeline-clock">北京时间 16:42:08</div>
-          </div>
-          <div className="timeline-track-wrap">
-            <button className="play-button" onClick={() => setIsPlaying((playing) => !playing)} aria-label={isPlaying ? "暂停" : "播放"}>{isPlaying ? "Ⅱ" : "▶"}</button>
-            <div className="timeline-track">
-              <div className="track-line" /><div className="track-progress" style={{ width: `${(step / (forecastSteps.length - 1)) * 100}%` }} />
-              {forecastSteps.map((label, index) => (
-                <button key={label} className={`time-point ${index === step ? "active" : ""}`} style={{ left: `${(index / (forecastSteps.length - 1)) * 100}%` }} onClick={() => { setStep(index); setIsPlaying(false); }}>
-                  <span className="point-dot" /><span className="point-label">{label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="timeline-footer"><span>数据源 · Open-Meteo Open Data</span><span>最后更新 16:30</span><span className="footer-live">自动播放已开启</span></div>
-        </section>
-      </main>
-    </div>
-  );
+  </aside>}<div className="data-credit">{satelliteMode?'JMA · Himawari-9':`Open-Meteo S3 · ${grid?.meta.dx ?? (model==='grapes'?0.125:0.25)}°`} / <a href="https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9" target="_blank" rel="noreferrer">{ESRI_CREDIT}</a> · <a href="https://docs.gmt-china.org/latest/dataset/CN-border/" target="_blank" rel="noreferrer">省界：GMT / 全国地理信息资源目录服务系统</a></div>
+ </main></div>;
 }
 
-export default App;
+export default function App(){
+ const getMode=()=>location.hash.startsWith('#news')?'news':location.hash==='#satellite'?'satellite':'home';
+ const [mode,setMode]=useState(getMode);
+ useEffect(()=>{const changed=()=>setMode(getMode());addEventListener('hashchange',changed);return()=>removeEventListener('hashchange',changed);},[]);
+ return <><header className="topbar"><span className="brand-name">晴川观象</span><nav aria-label="主导航">{[['home','首页'],['satellite','葵花卫星'],['news','资讯']].map(([id,title])=><button key={id} className={`nav-item ${mode===id?'nav-item-active':''}`} onClick={()=>{location.hash=id==='home'?'':id;setMode(id);}}>{title}</button>)}</nav></header>{mode==='news'?<NewsPage/>:<WeatherApp satelliteMode={mode==='satellite'}/>}</>;
+}
