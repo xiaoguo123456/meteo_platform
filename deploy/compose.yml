@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     environment:
       METEO_OPEN_METEO_BASE_URL: http://host.docker.internal:8090/v1/forecast
+      METEO_OPEN_METEO_SATELLITE_BASE_URL: http://host.docker.internal:8090/v1/archive
+      METEO_OPEN_METEO_SATELLITE_MODEL: jma_jaxa_himawari
       WEATHER_FORECAST_CACHE: /data/forecasts
       WEATHER_DOWNLOAD_CONCURRENCY: "4"
       WEATHER_S3_BLOCK_SIZE: "262144"

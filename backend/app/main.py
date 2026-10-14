@@ -15,7 +15,7 @@ from .schemas import BoundaryCollection, FieldManifest, ModelSummary
 from .satellite_service import latest_himawari, satellite_loop
 from .spatial_provider import SpatialDataError
 from .weather_service import WeatherDataError, get_weather_grid, get_weather_particles
-from .site_forecast import forecast as site_forecast, list_stations
+from .site_forecast import forecast as site_forecast, list_stations, satellite_radiation
 
 
 settings = get_settings()
@@ -67,7 +67,15 @@ def site_stations() -> list[dict[str, object]]:
 @app.get("/api/site-forecast")
 async def site_forecast_data(station_id: str = "zhangbei-wind", model: str = "gfs") -> dict[str, object]:
     try:
-        return await site_forecast(station_id, model)
+        return await site_forecast(station_id, model, include_satellite=False)
+    except (ValueError, RuntimeError, httpx.HTTPError) as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+@app.get("/api/site-satellite")
+async def site_satellite_data(station_id: str = "ningxia-solar") -> dict[str, object]:
+    try:
+        return await satellite_radiation(station_id)
     except (ValueError, RuntimeError, httpx.HTTPError) as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 

@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from functools import lru_cache
 from pathlib import Path
+from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -10,6 +13,8 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     # 站点预测统一走本机自部署 Open-Meteo，不直接让浏览器访问上游。
     open_meteo_base_url: str = "http://127.0.0.1:8090/v1/forecast"
+    open_meteo_satellite_base_url: Optional[str] = None
+    open_meteo_satellite_model: str = "jma_jaxa_himawari"
 
     model_config = SettingsConfigDict(env_prefix="METEO_", env_file=".env", extra="ignore")
 

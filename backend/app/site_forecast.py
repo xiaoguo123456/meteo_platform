@@ -1,7 +1,8 @@
 """站点预测的轻量适配层：把自部署 Open-Meteo 响应整理成网站需要的口径。"""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -60,7 +61,39 @@ def _iso(value: str | None) -> str | None:
     return value.replace(" ", "T") if value else None
 
 
-async def forecast(station_id: str, model: str = "gfs") -> dict[str, Any]:
+def _satellite_latest(raw: dict[str, Any]) -> dict[str, Any]:
+    block = raw.get("hourly") or {}
+    times = block.get("time") or []
+    ghi = block.get("shortwave_radiation") or []
+    direct = block.get("direct_radiation") or []
+    diffuse = block.get("diffuse_radiation") or []
+    series = []
+    latest = None
+    for i, value_time in enumerate(times):
+        value = ghi[i] if i < len(ghi) else None
+        item = {
+            "time": f"{_iso(value_time)}Z" if _iso(value_time) else None,
+            "ghi_w_m2": value,
+            "direct_w_m2": direct[i] if i < len(direct) else None,
+            "diffuse_w_m2": diffuse[i] if i < len(diffuse) else None,
+        }
+        series.append(item)
+        if value is not None:
+            latest = item
+    if latest is None:
+        return {"status": "unavailable", "source": "JAXA / P-Tree 葵花卫星", "series": series[-36:]}
+    return {
+        "status": "ok",
+        "source": "JAXA / P-Tree 葵花卫星",
+        "observed_at": latest["time"],
+        "ghi_w_m2": latest["ghi_w_m2"],
+        "direct_w_m2": latest["direct_w_m2"],
+        "diffuse_w_m2": latest["diffuse_w_m2"],
+        "series": series[-36:],
+    }
+
+
+async def forecast(station_id: str, model: str = "gfs", include_satellite: bool = False) -> dict[str, Any]:
     station = _station(station_id)
     params = MODEL_PARAMS.get(model)
     if not params:
@@ -76,8 +109,34 @@ async def forecast(station_id: str, model: str = "gfs") -> dict[str, Any]:
         "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,cloud_cover,precipitation,shortwave_radiation",
         "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,sunrise,sunset",
     }
+    if include_satellite and station["type"] == "solar":
+        satellite_base = settings.open_meteo_satellite_base_url or settings.open_meteo_base_url.replace("/forecast", "/archive")
+        now = datetime.now(timezone.utc)
+        satellite_query = {
+            "latitude": station["latitude"],
+            "longitude": station["longitude"],
+            "hourly": "shortwave_radiation,direct_radiation,diffuse_radiation",
+            "temporal_resolution": "native",
+            "models": settings.open_meteo_satellite_model,
+            "timezone": "UTC",
+            "start_date": (now - timedelta(days=1)).date().isoformat(),
+            "end_date": now.date().isoformat(),
+        }
     async with httpx.AsyncClient(timeout=18) as client:
-        response = await client.get(settings.open_meteo_base_url, params=query)
+        async def get_forecast():
+            return await client.get(settings.open_meteo_base_url, params=query)
+        async def get_satellite():
+            return await client.get(satellite_base, params=satellite_query)
+        if include_satellite and station["type"] == "solar":
+            response, satellite_response = await asyncio.gather(get_forecast(), get_satellite(), return_exceptions=True)
+        else:
+            response = await get_forecast()
+            satellite_response = None
+        satellite_raw = None
+        if isinstance(satellite_response, httpx.Response) and satellite_response.is_success:
+            satellite_raw = satellite_response.json()
+        if isinstance(response, Exception):
+            raise RuntimeError(f"自部署 Open-Meteo 请求失败：{response}") from response
     if response.status_code >= 400:
         raise RuntimeError(f"自部署 Open-Meteo 返回 {response.status_code}")
     raw = response.json()
@@ -124,6 +183,7 @@ async def forecast(station_id: str, model: str = "gfs") -> dict[str, Any]:
             "energy_kwh": round(sum(powers), 1) if powers else None,
         })
     current = raw.get("current") or {}
+    satellite = _satellite_latest(satellite_raw) if satellite_raw else {"status": "unavailable", "source": "JAXA / P-Tree 葵花卫星", "series": []}
     return {
         "station": station,
         "model": model,
@@ -142,6 +202,32 @@ async def forecast(station_id: str, model: str = "gfs") -> dict[str, Any]:
             "radiation": current.get("shortwave_radiation"),
             "power_kw": _power(station, current.get("wind_speed_10m"), current.get("shortwave_radiation"), current.get("cloud_cover")),
         },
+        "satellite": satellite,
         "hourly": hourly[:72],
         "days": days,
     }
+
+
+async def satellite_radiation(station_id: str) -> dict[str, Any]:
+    """独立读取葵花 10 分钟原生辐射，避免拖慢站点预报首屏。"""
+    station = _station(station_id)
+    if station["type"] != "solar":
+        return {"status": "not_applicable", "source": "JAXA / P-Tree 葵花卫星", "series": []}
+    settings = get_settings()
+    base = settings.open_meteo_satellite_base_url or settings.open_meteo_base_url.replace("/forecast", "/archive")
+    now = datetime.now(timezone.utc)
+    query = {
+        "latitude": station["latitude"],
+        "longitude": station["longitude"],
+        "hourly": "shortwave_radiation,direct_radiation,diffuse_radiation",
+        "temporal_resolution": "native",
+        "models": settings.open_meteo_satellite_model,
+        "timezone": "UTC",
+        "start_date": (now - timedelta(days=1)).date().isoformat(),
+        "end_date": now.date().isoformat(),
+    }
+    async with httpx.AsyncClient(timeout=18) as client:
+        response = await client.get(base, params=query)
+    if response.status_code >= 400:
+        raise RuntimeError(f"自部署 Open-Meteo 卫星接口返回 {response.status_code}")
+    return _satellite_latest(response.json())
