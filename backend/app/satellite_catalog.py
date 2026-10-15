@@ -227,7 +227,7 @@ def constellation_members(parent_id: str, limit: int = 80) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     for member in selected:
         value = _public_record(member)
-        points = build_track(member, hours=2, step_minutes=3)
+        points = build_track(member, hours=_orbit_window_hours(member), step_minutes=2)
         value["position"] = points[len(points) // 2] if points else None
         value["track"] = [{"longitude": point["longitude"], "latitude": point["latitude"]} for point in points]
         value["parent_id"] = parent_id
@@ -245,6 +245,12 @@ def _find_satellite(satellite_id: str) -> dict[str, Any] | None:
         if item:
             return item
     return None
+
+
+def _orbit_window_hours(item: dict[str, Any]) -> float:
+    """默认展示一整圈轨道，避免低轨卫星重复绕地球很多圈。"""
+    period = float(item.get("orbit", {}).get("period_minutes") or 90)
+    return min(12.0, max(0.5, period / 120.0))
 
 
 def _public_record(item: dict[str, Any], include_track: bool = False) -> dict[str, Any]:
@@ -282,7 +288,7 @@ def list_satellites(keyword: str = "", category: str = "", limit: int = 80) -> d
             value["member_count"] = len(_constellation_members(item["id"]))
         points = build_track(item, hours=0, step_minutes=2)
         value["position"] = points[len(points) // 2] if points else None
-        value["track"] = [{"longitude": point["longitude"], "latitude": point["latitude"]} for point in build_track(item, hours=2, step_minutes=5)]
+        value["track"] = [{"longitude": point["longitude"], "latitude": point["latitude"]} for point in build_track(item, hours=_orbit_window_hours(item), step_minutes=2)]
         public_items.append(value)
     return {
         "items": public_items,
@@ -299,7 +305,7 @@ def get_satellite(satellite_id: str) -> dict[str, Any] | None:
         return None
     item = _merged_item(item)
     value = _public_record(item)
-    value["track"] = build_track(item, hours=6, step_minutes=2)
+    value["track"] = build_track(item, hours=_orbit_window_hours(item), step_minutes=2)
     points = value.get("track") or []
     value["position"] = points[len(points) // 2] if points else None
     return value
