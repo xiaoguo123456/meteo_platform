@@ -24,11 +24,10 @@ function load(time:string,product:Product){
 export async function warmSatellite(){
  try{const v=await getCatalog('truecolor');const time=v.times[v.times.length-1];if(time)await load(time,'truecolor');const ir=await getCatalog('infrared');const t=ir.times[ir.times.length-1];if(t)await load(t,'infrared');}catch{/* 页面仍会显示实际加载错误。 */}
 }
-export default function SatellitePanel({onTexture,satellites=[],selectedId='',detail=null,onSelect}:{onTexture:(texture:EarthTexture|null)=>void;satellites?:SatelliteSummary[];selectedId?:string;detail?:SatelliteDetail|null;onSelect?:(id:string)=>void}){
+export function SatelliteObservationPanel({onTexture}:{onTexture:(texture:EarthTexture|null)=>void}){
  const [product,setProduct]=useState<Product>('truecolor');
  const [shownProduct,setShownProduct]=useState<Product>('truecolor');
  const [times,setTimes]=useState<string[]>([]),[selected,setSelected]=useState(''),[shown,setShown]=useState(''),[playing,setPlaying]=useState(false),[loading,setLoading]=useState(false),[error,setError]=useState(''),[sourceError,setSourceError]=useState('');
- const [category,setCategory]=useState(''),[keyword,setKeyword]=useState('');
  useEffect(()=>{let active=true;const poll=async()=>{try{const v=await getCatalog(product);if(active){setTimes(v.times);setSelected(old=>v.times.includes(old)?old:v.times[v.times.length-1]||'');setSourceError(v.error|| (v.stale?'卫星观测已过期':''));}}catch(e){if(active)setSourceError((e as Error).message);}};void poll();const timer=setInterval(poll,30000);return()=>{active=false;clearInterval(timer);};},[product]);
  useEffect(()=>()=>onTexture(null),[]);
  useEffect(()=>{if(!selected||!times.includes(selected))return;let active=true;setLoading(true);setError('');load(selected,product).then(t=>{if(active){onTexture(t);setShown(selected);setShownProduct(product);}}).catch(e=>{if(active){setError(e.message);setPlaying(false);}}).finally(()=>{if(active)setLoading(false);});return()=>{active=false;};},[selected,product,times.join(',')]);
@@ -41,13 +40,7 @@ export default function SatellitePanel({onTexture,satellites=[],selectedId='',de
  const v=await getCatalog(other);if(!active)return;if(v.times.includes(selected))await load(selected,other);
  })().catch(()=>{});return()=>{active=false;};},[index,loading,product,times.join(',')]);
  useEffect(()=>{if(!playing||loading)return;if(index>=times.length-1){setPlaying(false);return;}const timer=setTimeout(()=>setSelected(times[index+1]),1000);return()=>clearTimeout(timer);},[playing,loading,index,times.join(',')]);
- const visibleSatellites=satellites.filter(item=>(!category||item.category===category)&&(!keyword||`${item.name}${item.purpose}${item.operator}`.toLowerCase().includes(keyword.toLowerCase())));
- const orbit=detail?.orbit;
- return <aside className="control-panel satellite-control-panel"><div className="satellite-section-heading"><div><span className="satellite-kicker">ORBITAL CATALOG</span><strong>卫星轨迹</strong></div><span>{satellites.length} 个代表条目</span></div>
-  <div className="satellite-filters"><input value={keyword} onChange={e=>setKeyword(e.target.value)} placeholder="搜索卫星" aria-label="搜索卫星"/><select value={category} onChange={e=>setCategory(e.target.value)} aria-label="卫星类型"><option value="">全部类型</option><option value="weather">气象</option><option value="earth-observation">地球遥感</option><option value="ocean">海洋观测</option><option value="communications">通信</option><option value="leo-internet">低轨互联网</option><option value="navigation">导航定位</option><option value="science">空间科学</option><option value="space-weather">空间天气</option><option value="geodesy">测绘地球物理</option><option value="crewed">载人航天</option><option value="search-rescue">搜救中继</option><option value="technology">技术验证</option><option value="amateur">教育业余无线电</option><option value="security">安全侦察</option></select></div>
-  <div className="satellite-list" aria-label="卫星列表">{visibleSatellites.map(item=><button key={item.id} className={`satellite-list-item ${selectedId===item.id?'active':''}`} onClick={()=>onSelect?.(item.id)}><span className="satellite-dot"/><span><strong>{item.name}</strong><small>{item.purpose} · {item.orbit.orbit_class}</small></span><em>›</em></button>)}</div>
-  {detail&&<div className="satellite-detail"><div className="satellite-detail-head"><div><span className="satellite-kicker">SATELLITE PROFILE</span><h3>{detail.name}</h3></div><span className="satellite-category">{detail.purpose}</span></div><p className="satellite-summary">{detail.ai?.summary||detail.mission_summary}</p><div className="satellite-metrics"><span><b>{detail.position?.altitude_km?.toFixed(0)??'—'}</b> km 高度</span><span><b>{orbit?.inclination_deg?.toFixed(1)??'—'}°</b> 倾角</span><span><b>{orbit?.period_minutes?Math.round(orbit.period_minutes):'—'}</b> min 周期</span></div><div className="satellite-facts"><span>运营方</span><b>{detail.operator}</b><span>所属国家</span><b>{detail.country}</b><span>NORAD</span><b>{detail.norad_id??'星座条目'}</b><span>发射时间</span><b>{detail.launch_date||'—'}</b></div><div className="satellite-sources">{detail.sources?.slice(0,2).map(source=><a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.title} ↗</a>)}</div></div>}
-  <div className="satellite-observation-heading"><div><span className="satellite-kicker">SATELLITE OBSERVATION</span><strong>葵花九号</strong></div><span>云图</span></div>
+ return <section className="satellite-module satellite-observation-module"><div className="satellite-section-heading"><div><span className="satellite-kicker">SATELLITE OBSERVATION</span><strong>葵花九号</strong></div><span>云图</span></div>
   <div className="control-line"><span className="control-label">云图</span>{(Object.keys(names) as Product[]).map(p=><button key={p} aria-pressed={product===p} className={product===p?'choice active':'choice'} onClick={()=>{if(p===product)return;setPlaying(false);setTimes([]);setSourceError('');setProduct(p);}}>{names[p]}</button>)}</div>
   {(error||sourceError)&&<p role="alert">{error||sourceError}</p>}
   {!times.length&&<p role="status">正在提前缓存卫星观测…</p>}
@@ -55,5 +48,20 @@ export default function SatellitePanel({onTexture,satellites=[],selectedId='',de
   <div className="timeline-labels"><span>{times[0]?label(times[0]):'—'}</span><span>{times.length?label(times[times.length-1]):'—'}</span></div>
   <div className="forecast-readout"><strong>{shown?label(shown):'—'}</strong><span>北京时间</span></div>
   <div className="run-readout">JMA · {names[shownProduct]} · 观测</div>
- </aside>;
+ </section>;
+}
+
+export function SatelliteOrbitPanel({satellites=[],selectedId='',detail=null,onSelect}:{satellites?:SatelliteSummary[];selectedId?:string;detail?:SatelliteDetail|null;onSelect?:(id:string)=>void}){
+ const [category,setCategory]=useState(''),[keyword,setKeyword]=useState('');
+ const visibleSatellites=satellites.filter(item=>(!category||item.category===category)&&(!keyword||`${item.name}${item.purpose}${item.operator}`.toLowerCase().includes(keyword.toLowerCase())));
+ const orbit=detail?.orbit;
+ return <section className="satellite-module satellite-orbit-module"><div className="satellite-section-heading"><div><span className="satellite-kicker">ORBITAL CATALOG</span><strong>卫星轨迹</strong></div><span>{satellites.length} 个代表条目</span></div>
+  <div className="satellite-filters"><input value={keyword} onChange={e=>setKeyword(e.target.value)} placeholder="搜索卫星" aria-label="搜索卫星"/><select value={category} onChange={e=>setCategory(e.target.value)} aria-label="卫星类型"><option value="">全部类型</option><option value="weather">气象</option><option value="earth-observation">地球遥感</option><option value="ocean">海洋观测</option><option value="communications">通信</option><option value="leo-internet">低轨互联网</option><option value="navigation">导航定位</option><option value="science">空间科学</option><option value="space-weather">空间天气</option><option value="geodesy">测绘地球物理</option><option value="crewed">载人航天</option><option value="search-rescue">搜救中继</option><option value="technology">技术验证</option><option value="amateur">教育业余无线电</option><option value="security">安全侦察</option></select></div>
+  <div className="satellite-list" aria-label="卫星列表">{visibleSatellites.map(item=><button key={item.id} className={`satellite-list-item ${selectedId===item.id?'active':''}`} onClick={()=>onSelect?.(item.id)}><span className="satellite-dot"/><span><strong>{item.name}</strong><small>{item.purpose} · {item.orbit.orbit_class}</small></span><em>›</em></button>)}</div>
+  {detail&&<div className="satellite-detail"><div className="satellite-detail-head"><div><span className="satellite-kicker">SATELLITE PROFILE</span><h3>{detail.name}</h3></div><span className="satellite-category">{detail.purpose}</span></div><p className="satellite-summary">{detail.ai?.summary||detail.mission_summary}</p><div className="satellite-metrics"><span><b>{detail.position?.altitude_km?.toFixed(0)??'—'}</b> km 高度</span><span><b>{orbit?.inclination_deg?.toFixed(1)??'—'}°</b> 倾角</span><span><b>{orbit?.period_minutes?Math.round(orbit.period_minutes):'—'}</b> min 周期</span></div><div className="satellite-facts"><span>运营方</span><b>{detail.operator}</b><span>所属国家</span><b>{detail.country}</b><span>NORAD</span><b>{detail.norad_id??'星座条目'}</b><span>发射时间</span><b>{detail.launch_date||'—'}</b></div><div className="satellite-sources">{detail.sources?.slice(0,2).map(source=><a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.title} ↗</a>)}</div></div>}
+ </section>;
+}
+
+export default function SatellitePanel({onTexture,satellites=[],selectedId='',detail=null,onSelect}:{onTexture:(texture:EarthTexture|null)=>void;satellites?:SatelliteSummary[];selectedId?:string;detail?:SatelliteDetail|null;onSelect?:(id:string)=>void}){
+ return <div className="satellite-modules"><SatelliteObservationPanel onTexture={onTexture}/><SatelliteOrbitPanel satellites={satellites} selectedId={selectedId} detail={detail} onSelect={onSelect}/></div>;
 }
