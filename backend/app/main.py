@@ -13,7 +13,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from .catalog import MODEL_CATALOG, VARIABLE_CATALOG
 from .config import get_settings
 from .schemas import BoundaryCollection, FieldManifest, ModelSummary
-from .satellite_service import latest_himawari, satellite_loop, station_image
+from .satellite_service import latest_himawari, local_image_bounds, satellite_loop, station_image
 from .spatial_provider import SpatialDataError
 from .weather_service import WeatherDataError, get_weather_grid, get_weather_particles
 from .site_forecast import SiteCreate, _station, create_station, forecast as site_forecast, list_stations, satellite_radiation
@@ -166,10 +166,12 @@ async def himawari_station_image(station_id: str, product: str = 'truecolor'):
     try:
         station = _station(station_id)
         observed, content = await station_image(station_id, station['latitude'], station['longitude'], product)
+        west, south, east, north = local_image_bounds(station['longitude'], station['latitude'])
         return Response(content, media_type='image/webp', headers={
             'Cache-Control': 'public, max-age=300',
             'X-Satellite-Time': observed,
             'X-Satellite-Product': product,
+            'X-Satellite-Bounds': f'{west:.6f},{south:.6f},{east:.6f},{north:.6f}',
         })
     except (ValueError, RuntimeError, httpx.HTTPError) as error:
         raise HTTPException(status_code=503, detail=str(error)) from error

@@ -152,6 +152,20 @@ def _local_tile_range(lon: float, lat: float, zoom: int = LOCAL_ZOOM) -> tuple[i
     return max(0, x0), max(0, y0), min(limit, x1), min(limit, y1)
 
 
+def local_image_bounds(longitude: float, latitude: float, zoom: int = LOCAL_ZOOM) -> tuple[float, float, float, float]:
+    """返回局部拼图的 Web Mercator 地理范围（west, south, east, north）。"""
+    x0, y0, x1, y1 = _local_tile_range(longitude, latitude, zoom)
+    n = 2 ** zoom
+
+    def lon(x: int) -> float:
+        return x / n * 360.0 - 180.0
+
+    def lat(y: int) -> float:
+        return math.degrees(math.atan(math.sinh(math.pi * (1.0 - 2.0 * y / n))))
+
+    return lon(x0), lat(y1 + 1), lon(x1 + 1), lat(y0)
+
+
 async def station_image(station_key: str, latitude: float, longitude: float, product: str = 'truecolor') -> tuple[str, bytes]:
     """按站点 bbox 获取葵花 Web Mercator 局部瓦片并拼图，避免裁剪全球空白图。"""
     if product not in PRODUCTS:
@@ -183,11 +197,16 @@ async def station_image(station_key: str, latitude: float, longitude: float, pro
     if not any(body for _, _, body in tiles):
         raise RuntimeError('葵花局部瓦片尚未发布')
     cols, rows = x1 - x0 + 1, y1 - y0 + 1
-    image = Image.new('RGB', (cols * 256, rows * 256), (235, 243, 243))
+    image = Image.new('RGBA', (cols * 256, rows * 256), (235, 243, 243, 255))
     for x, y, body in tiles:
         if body:
             with Image.open(io.BytesIO(body)) as tile:
-                image.paste(tile.convert('RGB'), ((x - x0) * 256, (y - y0) * 256))
+                tile_image = tile.convert('RGBA')
+                # JMA 真彩色全圆盘边缘的无效区域是纯黑色，透明化后由卡片底色承接，避免出现突兀黑三角。
+                if product == 'truecolor':
+                    luminance = tile_image.convert('RGB').convert('L')
+                    tile_image.putalpha(luminance.point(lambda value: 0 if value < 8 else 255))
+                image.alpha_composite(tile_image, ((x - x0) * 256, (y - y0) * 256))
     output = io.BytesIO()
     image.save(output, format='WEBP', quality=88, method=4)
     result = output.getvalue()
