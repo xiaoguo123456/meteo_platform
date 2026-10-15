@@ -4,8 +4,21 @@ import type { Grid } from './windMath';
 import { loadEarthTexture, type EarthTexture } from './basemap';
 import type { Viewport } from './viewTiles';
 
-export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satellite}:{grid:Grid|null;satellite:EarthTexture|null;animated:boolean;onViewChange:(view:Viewport)=>void;onPoint:(point:[number,number])=>void}){
+export type SatelliteOverlay = {
+ id:string;
+ name:string;
+ category:string;
+ color:string;
+ position:{longitude:number;latitude:number};
+ track?:{longitude:number;latitude:number}[];
+};
+
+export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satellite,satellites=[],selectedSatelliteId,onSatelliteClick}:{grid:Grid|null;satellite:EarthTexture|null;animated:boolean;onViewChange:(view:Viewport)=>void;onPoint:(point:[number,number])=>void;satellites?:SatelliteOverlay[];selectedSatelliteId?:string;onSatelliteClick?:(id:string)=>void}){
  const pointCallback=useRef(onPoint);pointCallback.current=onPoint;
+ const satelliteCallback=useRef(onSatelliteClick);satelliteCallback.current=onSatelliteClick;
+ const satellitesRef=useRef<SatelliteOverlay[]>(satellites);satellitesRef.current=satellites;
+ const selectedSatelliteRef=useRef(selectedSatelliteId);selectedSatelliteRef.current=selectedSatelliteId;
+ const redraw=useRef<()=>void>(()=>{});
  const [renderError,setRenderError]=useState('');
  const viewCallback=useRef(onViewChange);viewCallback.current=onViewChange;
  const updateSatellite=useRef<(value:EarthTexture|null)=>void>(()=>{});
@@ -28,7 +41,10 @@ export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satelli
   const samples:{model:string;field:string;time:string;totalMs:number;waitMs:number;buildMs:number}[]=[];
   let measuredFrames=0,measuredCost=0,measureStart=performance.now();
   let particles:{x:number;y:number;age:number}[]=[];
-  const drawMap=()=>{if(!displayed)return;const {rotation,radius,field}=displayed;const projected=geoOrthographic().rotate(rotation).translate([width/2,height/2]).scale(radius).clipAngle(90);mctx.clearRect(0,0,width,height);const path=geoPath(projected,mctx);mctx.beginPath();path(geoGraticule10());mctx.strokeStyle=field&&field!=='wind'?'rgba(47,77,89,.13)':'rgba(174,191,238,.18)';mctx.lineWidth=.55;mctx.stroke();if(coast){mctx.beginPath();path(coast);mctx.strokeStyle=field&&field!=='wind'?'rgba(47,77,89,.5)':'rgba(187,205,255,.8)';mctx.lineWidth=.65;mctx.stroke();}if(provinces){mctx.beginPath();path(provinces);mctx.strokeStyle=field&&field!=='wind'?'rgba(35,61,67,.65)':'rgba(221,233,245,.8)';mctx.lineWidth=.7;mctx.stroke();}mctx.beginPath();mctx.arc(width/2,height/2,radius,0,2*Math.PI);mctx.strokeStyle='#718c92';mctx.stroke();};
+  const drawMap=()=>{if(!displayed)return;const {rotation,radius,field}=displayed;const projected=geoOrthographic().rotate(rotation).translate([width/2,height/2]).scale(radius).clipAngle(90);mctx.clearRect(0,0,width,height);const path=geoPath(projected,mctx);mctx.beginPath();path(geoGraticule10());mctx.strokeStyle=field&&field!=='wind'?'rgba(47,77,89,.13)':'rgba(174,191,238,.18)';mctx.lineWidth=.55;mctx.stroke();if(coast){mctx.beginPath();path(coast);mctx.strokeStyle=field&&field!=='wind'?'rgba(47,77,89,.5)':'rgba(187,205,255,.8)';mctx.lineWidth=.65;mctx.stroke();}if(provinces){mctx.beginPath();path(provinces);mctx.strokeStyle=field&&field!=='wind'?'rgba(35,61,67,.65)':'rgba(221,233,245,.8)';mctx.lineWidth=.7;mctx.stroke();}
+   // 卫星轨迹绘制在边界之上；只渲染当前可见半球，避免轨迹“飘”在地球背面。
+   satellitesRef.current.forEach(item=>{const selected=item.id===selectedSatelliteRef.current;const points=item.track||[];mctx.beginPath();let drawing=false;for(const point of points){const xy=projected([point.longitude,point.latitude]);if(!xy){drawing=false;continue;}if(!drawing){mctx.moveTo(xy[0],xy[1]);drawing=true;}else mctx.lineTo(xy[0],xy[1]);}mctx.strokeStyle=selected?item.color:'rgba(63,105,112,.48)';mctx.lineWidth=selected?1.7:0.8;mctx.stroke();const marker=projected([item.position.longitude,item.position.latitude]);if(marker){mctx.beginPath();mctx.arc(marker[0],marker[1],selected?5:3,0,Math.PI*2);mctx.fillStyle=item.color;mctx.fill();mctx.strokeStyle='rgba(255,255,255,.9)';mctx.lineWidth=selected?1.5:.8;mctx.stroke();}});
+   mctx.beginPath();mctx.arc(width/2,height/2,radius,0,2*Math.PI);mctx.strokeStyle='#718c92';mctx.stroke();};
   const submit=()=>{if(busy||!pending||disposed)return;busy=true;worker.postMessage(pending);pending=null;};
   let reported='';
   const report=()=>{const value={width,height,radius,rotation:[...rotation] as [number,number,number]},key=JSON.stringify(value);if(key!==reported){reported=key;viewCallback.current(value);}};
@@ -71,7 +87,7 @@ export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satelli
   let drag:{x:number;y:number;r:[number,number,number]}|null=null;
   const down=(e:PointerEvent)=>{container.setPointerCapture(e.pointerId);drag={x:e.clientX,y:e.clientY,r:[...rotation]};};
   const move=(e:PointerEvent)=>{if(!drag)return;rotation=[drag.r[0]+(e.clientX-drag.x)*.3,Math.max(-85,Math.min(85,drag.r[1]-(e.clientY-drag.y)*.3)),0];rebuild();};
-  const up=(e:PointerEvent)=>{if(drag&&e.type==='pointerup'&&Math.hypot(e.clientX-drag.x,e.clientY-drag.y)<5&&displayed){const rect=container.getBoundingClientRect(),px=e.clientX-rect.left,py=e.clientY-rect.top;if(Math.hypot(px-width/2,py-height/2)<=displayed.radius){const p=geoOrthographic().rotate(displayed.rotation).translate([width/2,height/2]).scale(displayed.radius).invert!([px,py]);if(p)pointCallback.current(p);}}drag=null;clearTimeout(rebuildTimer);request();};const wheel=(e:WheelEvent)=>{e.preventDefault();zoom=Math.max(.65,Math.min(3,zoom*Math.exp(-e.deltaY*.001)));rebuild();};
+  const up=(e:PointerEvent)=>{if(drag&&e.type==='pointerup'&&Math.hypot(e.clientX-drag.x,e.clientY-drag.y)<5&&displayed){const rect=container.getBoundingClientRect(),px=e.clientX-rect.left,py=e.clientY-rect.top;if(Math.hypot(px-width/2,py-height/2)<=displayed.radius){const projected=geoOrthographic().rotate(displayed.rotation).translate([width/2,height/2]).scale(displayed.radius).clipAngle(90);let hit:string|undefined;let distance=14;for(const item of satellitesRef.current){const marker=projected([item.position.longitude,item.position.latitude]);if(!marker)continue;const d=Math.hypot(px-marker[0],py-marker[1]);if(d<distance){distance=d;hit=item.id;}}if(hit&&satelliteCallback.current){satelliteCallback.current(hit);}else{const p=projected.invert!([px,py]);if(p)pointCallback.current(p);}}}drag=null;clearTimeout(rebuildTimer);request();};const wheel=(e:WheelEvent)=>{e.preventDefault();zoom=Math.max(.65,Math.min(3,zoom*Math.exp(-e.deltaY*.001)));rebuild();};
   const keydown=(e:KeyboardEvent)=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','+','=','-'].includes(e.key)){e.preventDefault();if(e.key==='ArrowLeft')rotation[0]-=8;if(e.key==='ArrowRight')rotation[0]+=8;if(e.key==='ArrowUp')rotation[1]=Math.min(85,rotation[1]+8);if(e.key==='ArrowDown')rotation[1]=Math.max(-85,rotation[1]-8);if(e.key==='+'||e.key==='=')zoom=Math.min(3,zoom*1.15);if(e.key==='-')zoom=Math.max(.65,zoom/1.15);rebuild();}};
   container.addEventListener('keydown',keydown);
   container.addEventListener('pointerdown',down);container.addEventListener('pointermove',move);container.addEventListener('pointerup',up);container.addEventListener('pointercancel',up);container.addEventListener('wheel',wheel,{passive:false});
@@ -83,9 +99,11 @@ export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satelli
    buckets.forEach((b,i)=>{ctx.beginPath();ctx.strokeStyle=`rgba(${160+i*10},${195+i*7},${195+i*7},.65)`;ctx.lineWidth=.8;for(let j=0;j<b.length;j+=4){ctx.moveTo(b[j],b[j+1]);ctx.lineTo(b[j+2],b[j+3]);}ctx.stroke();});
    measuredFrames++;measuredCost+=performance.now()-started;if(now-measureStart>=2000){container.dataset.fps=(measuredFrames*1000/(now-measureStart)).toFixed(1);container.dataset.frameCostMs=(measuredCost/measuredFrames).toFixed(2);measuredFrames=0;measuredCost=0;measureStart=now;}
   };frame=requestAnimationFrame(tick);
-  return()=>{view.current={zoom,rotation};disposed=true;clearTimeout(rebuildTimer);cancelAnimationFrame(frame);worker.terminate();observer.disconnect();container.removeEventListener('keydown',keydown);container.removeEventListener('pointerdown',down);container.removeEventListener('pointermove',move);container.removeEventListener('pointerup',up);container.removeEventListener('pointercancel',up);container.removeEventListener('wheel',wheel);};
+  redraw.current=drawMap;
+  return()=>{view.current={zoom,rotation};disposed=true;redraw.current=()=>{};clearTimeout(rebuildTimer);cancelAnimationFrame(frame);worker.terminate();observer.disconnect();container.removeEventListener('keydown',keydown);container.removeEventListener('pointerdown',down);container.removeEventListener('pointermove',move);container.removeEventListener('pointerup',up);container.removeEventListener('pointercancel',up);container.removeEventListener('wheel',wheel);};
  },[]);
  useEffect(()=>{updateGrid.current(grid);},[grid]);
  useEffect(()=>{updateSatellite.current(satellite);},[satellite]);
+ useEffect(()=>{satellitesRef.current=satellites;selectedSatelliteRef.current=selectedSatelliteId;redraw.current();},[satellites,selectedSatelliteId]);
  return <div className="weather-globe" ref={host} tabIndex={0} aria-label="地球视图，方向键旋转，加减键缩放"><canvas ref={base}/><canvas ref={lines}/><canvas ref={map}/>{renderError&&<div role="alert" className="load-status error">{renderError}</div>}</div>;
 }

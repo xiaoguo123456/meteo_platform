@@ -10,3 +10,4 @@ Pillow>=10,<13
 beautifulsoup4>=4.12,<5
 feedparser>=6,<7
 pypdf>=5,<6
+sgp4>=2.24,<3
