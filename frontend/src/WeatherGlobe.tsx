@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { geoOrthographic, geoPath, geoGraticule10 } from 'd3-geo';
+import { geoOrthographic, geoPath, geoGraticule10, geoRotation } from 'd3-geo';
 import type { Grid } from './windMath';
 import { loadEarthTexture, type EarthTexture } from './basemap';
 import type { Viewport } from './viewTiles';
@@ -42,23 +42,32 @@ export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satelli
   let measuredFrames=0,measuredCost=0,measureStart=performance.now();
   let particles:{x:number;y:number;age:number}[]=[];
   const drawMap=()=>{if(!displayed)return;const {rotation,radius,field}=displayed;const projected=geoOrthographic().rotate(rotation).translate([width/2,height/2]).scale(radius).clipAngle(90);mctx.clearRect(0,0,width,height);const path=geoPath(projected,mctx);mctx.beginPath();path(geoGraticule10());mctx.strokeStyle=field&&field!=='wind'?'rgba(47,77,89,.13)':'rgba(174,191,238,.18)';mctx.lineWidth=.55;mctx.stroke();if(coast){mctx.beginPath();path(coast);mctx.strokeStyle=field&&field!=='wind'?'rgba(47,77,89,.5)':'rgba(187,205,255,.8)';mctx.lineWidth=.65;mctx.stroke();}if(provinces){mctx.beginPath();path(provinces);mctx.strokeStyle=field&&field!=='wind'?'rgba(35,61,67,.65)':'rgba(221,233,245,.8)';mctx.lineWidth=.7;mctx.stroke();}
-   // 卫星轨迹绘制在边界之上；只渲染当前可见半球，避免轨迹“飘”在地球背面。
+   // 卫星轨迹绘制在边界之上。轨迹必须经过 d3-geo 的球面裁剪，不能只依赖
+   // projection(point)：后者即使设置了 clipAngle，也仍会返回背面点的坐标。
    const selectedSatellite=satellitesRef.current.find(item=>item.id===selectedSatelliteRef.current);
    if(selectedSatellite){
     const points=selectedSatellite.track||[];
-    const frontPath=new Path2D();
-    let frontDrawing=false,previousLongitude:number|undefined;
-    for(const point of points){
-     const xy=projected([point.longitude,point.latitude]);
-     const crossesDateLine=previousLongitude!==undefined&&Math.abs(point.longitude-previousLongitude)>120;
-     if(!xy||crossesDateLine){frontDrawing=false;previousLongitude=point.longitude;continue;}
-     if(xy){
-      if(!frontDrawing){frontPath.moveTo(xy[0],xy[1]);frontDrawing=true;}else frontPath.lineTo(xy[0],xy[1]);
+    if(points.length>1){
+     const trackPath:any={type:'MultiLineString',coordinates:[] as [number,number][][]};
+     let segment:[number,number][]=[];
+     for(let index=0;index<points.length;index++){
+      const point=points[index];
+      const previous=points[index-1];
+      const crossesDateLine=!!previous&&Math.abs(point.longitude-previous.longitude)>120;
+      if(crossesDateLine){if(segment.length>1)trackPath.coordinates.push(segment);segment=[];}
+      segment.push([point.longitude,point.latitude]);
      }
-     previousLongitude=point.longitude;
+     if(segment.length>1)trackPath.coordinates.push(segment);
+     mctx.beginPath();
+     path(trackPath);
+     mctx.strokeStyle=selectedSatellite.color;mctx.lineWidth=1.8;mctx.stroke();
     }
-    mctx.strokeStyle=selectedSatellite.color;mctx.lineWidth=1.8;mctx.stroke(frontPath);
-    const marker=projected([selectedSatellite.position.longitude,selectedSatellite.position.latitude]);if(marker){mctx.beginPath();mctx.arc(marker[0],marker[1],5,0,Math.PI*2);mctx.fillStyle=selectedSatellite.color;mctx.fill();mctx.strokeStyle='rgba(255,255,255,.95)';mctx.lineWidth=1.5;mctx.stroke();}
+    const markerPoint=[selectedSatellite.position.longitude,selectedSatellite.position.latitude] as [number,number];
+    // 判断旋转后的经度是否落在观测者所在半球；这样拖动地球时，背面点不会穿透到前面。
+    const rotated=geoRotation(rotation)(markerPoint);
+    const visible=Math.cos(rotated[0]*Math.PI/180)*Math.cos(rotated[1]*Math.PI/180)>=-1e-6;
+    const marker=visible?projected(markerPoint):null;
+    if(marker){mctx.beginPath();mctx.arc(marker[0],marker[1],5,0,Math.PI*2);mctx.fillStyle=selectedSatellite.color;mctx.fill();mctx.strokeStyle='rgba(255,255,255,.95)';mctx.lineWidth=1.5;mctx.stroke();}
    }
    mctx.beginPath();mctx.arc(width/2,height/2,radius,0,2*Math.PI);mctx.strokeStyle='#718c92';mctx.stroke();};
   const submit=()=>{if(busy||!pending||disposed)return;busy=true;worker.postMessage(pending);pending=null;};
