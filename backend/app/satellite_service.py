@@ -2,10 +2,13 @@
 import asyncio
 import io
 import json
+import math
 import os
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 import httpx
 from PIL import Image
 
@@ -13,6 +16,9 @@ TARGET_TIMES_URL = 'https://www.jma.go.jp/bosai/himawari/data/satimg/targetTimes
 ROOT = Path(os.getenv('METEO_DATA_DIR', str(Path(__file__).resolve().parents[2]/'data')))/'satellite/himawari'
 KEEP = 36
 PRODUCTS = {'truecolor': 'REP/ETC', 'infrared': 'B13/TBB'}
+LOCAL_ZOOM = 5
+LOCAL_CACHE_TTL = 300
+_LOCAL_CACHE: dict[tuple[str, str], tuple[float, str, bytes]] = {}
 
 
 def product_root(product):
@@ -126,6 +132,67 @@ async def satellite_loop():
 
 async def latest_himawari(product='truecolor'):
     return catalog(product)
+
+
+def _lonlat_to_tile(lon: float, lat: float, zoom: int) -> tuple[float, float]:
+    n = 2 ** zoom
+    x = (lon + 180.0) / 360.0 * n
+    lat_r = math.radians(max(-85.05, min(85.05, lat)))
+    y = (1.0 - math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r)) / math.pi) / 2.0 * n
+    return x, y
+
+
+def _local_tile_range(lon: float, lat: float, zoom: int = LOCAL_ZOOM) -> tuple[int, int, int, int]:
+    # 与小程序相同：按站点周边约 16°×12° 的局部 bbox 取瓦片，不加载全球影像。
+    west, east = lon - 8.0, lon + 8.0
+    south, north = max(-80.0, lat - 6.0), min(80.0, lat + 6.0)
+    x0, y0 = (int(v) for v in _lonlat_to_tile(west, north, zoom))
+    x1, y1 = (int(v) for v in _lonlat_to_tile(east, south, zoom))
+    limit = 2 ** zoom - 1
+    return max(0, x0), max(0, y0), min(limit, x1), min(limit, y1)
+
+
+async def station_image(station_key: str, latitude: float, longitude: float, product: str = 'truecolor') -> tuple[str, bytes]:
+    """按站点 bbox 获取葵花 Web Mercator 局部瓦片并拼图，避免裁剪全球空白图。"""
+    if product not in PRODUCTS:
+        raise ValueError('卫星产品无效')
+    cache_key = (station_key, product)
+    cached = _LOCAL_CACHE.get(cache_key)
+    if cached and time.monotonic() - cached[0] < LOCAL_CACHE_TTL:
+        return cached[1], cached[2]
+    async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
+        response = await client.get(TARGET_TIMES_URL)
+        response.raise_for_status()
+        times = sorted({item.get('basetime') or item.get('validtime') for item in response.json() if re.fullmatch(r'\d{14}', item.get('basetime', '') or item.get('validtime', ''))})
+        if not times:
+            raise RuntimeError('葵花观测暂无可用时刻')
+        observed = times[-1]
+        x0, y0, x1, y1 = _local_tile_range(longitude, latitude)
+        semaphore = asyncio.Semaphore(8)
+
+        async def fetch_tile(x: int, y: int) -> tuple[int, int, Optional[bytes]]:
+            url = f'https://www.jma.go.jp/bosai/himawari/data/satimg/{observed}/fd/{observed}/{PRODUCTS[product]}/{LOCAL_ZOOM}/{x}/{y}.jpg'
+            async with semaphore:
+                tile_response = await client.get(url)
+            if tile_response.status_code == 404:
+                return x, y, None
+            tile_response.raise_for_status()
+            return x, y, tile_response.content
+
+        tiles = await asyncio.gather(*(fetch_tile(x, y) for y in range(y0, y1 + 1) for x in range(x0, x1 + 1)))
+    if not any(body for _, _, body in tiles):
+        raise RuntimeError('葵花局部瓦片尚未发布')
+    cols, rows = x1 - x0 + 1, y1 - y0 + 1
+    image = Image.new('RGB', (cols * 256, rows * 256), (235, 243, 243))
+    for x, y, body in tiles:
+        if body:
+            with Image.open(io.BytesIO(body)) as tile:
+                image.paste(tile.convert('RGB'), ((x - x0) * 256, (y - y0) * 256))
+    output = io.BytesIO()
+    image.save(output, format='WEBP', quality=88, method=4)
+    result = output.getvalue()
+    _LOCAL_CACHE[cache_key] = (time.monotonic(), observed, result)
+    return observed, result
 
 
 def image_path(time, product='truecolor'):

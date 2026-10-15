@@ -13,10 +13,10 @@ from fastapi.middleware.gzip import GZipMiddleware
 from .catalog import MODEL_CATALOG, VARIABLE_CATALOG
 from .config import get_settings
 from .schemas import BoundaryCollection, FieldManifest, ModelSummary
-from .satellite_service import latest_himawari, satellite_loop
+from .satellite_service import latest_himawari, satellite_loop, station_image
 from .spatial_provider import SpatialDataError
 from .weather_service import WeatherDataError, get_weather_grid, get_weather_particles
-from .site_forecast import SiteCreate, create_station, forecast as site_forecast, list_stations, satellite_radiation
+from .site_forecast import SiteCreate, _station, create_station, forecast as site_forecast, list_stations, satellite_radiation
 
 
 settings = get_settings()
@@ -157,6 +157,22 @@ def field_manifest(model_id: str, valid_time: str) -> FieldManifest:
 async def himawari_latest(product: str = 'truecolor') -> dict[str, object]:
     try:return await latest_himawari(product)
     except ValueError as error:raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.get('/api/satellite/himawari/station/{station_id}')
+async def himawari_station_image(station_id: str, product: str = 'truecolor'):
+    """按场站周边 bbox 获取葵花局部瓦片，前端右侧直接展示。"""
+    from fastapi.responses import Response
+    try:
+        station = _station(station_id)
+        observed, content = await station_image(station_id, station['latitude'], station['longitude'], product)
+        return Response(content, media_type='image/webp', headers={
+            'Cache-Control': 'public, max-age=300',
+            'X-Satellite-Time': observed,
+            'X-Satellite-Product': product,
+        })
+    except (ValueError, RuntimeError, httpx.HTTPError) as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
 
 
 @app.get('/api/boundaries/provinces')
