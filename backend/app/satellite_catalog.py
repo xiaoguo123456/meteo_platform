@@ -129,13 +129,37 @@ SATELLITES: list[dict[str, Any]] = [
     _satellite("cubesat-demo", "CubeSat 技术验证代表", "technology", "多国", "高校与商业机构", "技术验证", "用于展示小卫星平台、通信、姿态控制或新型载荷的技术验证任务。", 96, 97, 500, 0, 1.1, source_urls=[_source("NASA Small Satellite Missions", "https://www.nasa.gov/smallsat-institute/")], subcategories=["CubeSat", "技术验证"]),
 ]
 
+CONSTELLATION_GROUPS: dict[str, dict[str, Any]] = {
+    "starlink-group": {"group": "starlink", "count": 24, "country": "美国", "operator": "SpaceX", "purpose": "低轨宽带通信"},
+    "oneweb-group": {"group": "oneweb", "count": 16, "country": "英国", "operator": "Eutelsat OneWeb", "purpose": "低轨宽带通信"},
+}
+for _item in SATELLITES:
+    if _item["id"] in CONSTELLATION_GROUPS:
+        _item["is_constellation"] = True
+        _item["member_count"] = CONSTELLATION_GROUPS[_item["id"]]["count"]
+
 
 def orbit_cache_path() -> Path:
     return Path(os.getenv("METEO_DATA_DIR", str(Path(__file__).resolve().parents[2] / "data"))) / "satellite_orbits.json"
 
 
+def constellation_cache_path() -> Path:
+    return Path(os.getenv("METEO_DATA_DIR", str(Path(__file__).resolve().parents[2] / "data"))) / "satellite_constellations.json"
+
+
 def _orbit_cache() -> dict[str, Any]:
     path = orbit_cache_path()
+    if not path.exists():
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def _constellation_cache() -> dict[str, Any]:
+    path = constellation_cache_path()
     if not path.exists():
         return {}
     try:
@@ -153,6 +177,74 @@ def _merged_item(item: dict[str, Any]) -> dict[str, Any]:
     if cached.get("tle"):
         value["_tle"] = cached["tle"]
     return value
+
+
+def _seed_constellation_members(parent_id: str) -> list[dict[str, Any]]:
+    """上游暂不可用时保留少量可用的星座代表轨道，真实目录同步后自动替换。"""
+    parent = next((value for value in SATELLITES if value["id"] == parent_id), None)
+    config = CONSTELLATION_GROUPS.get(parent_id)
+    if not parent or not config:
+        return []
+    members: list[dict[str, Any]] = []
+    count = int(config["count"])
+    for index in range(count):
+        member_id = f"{parent_id}-member-{index + 1:02d}"
+        member = _satellite(
+            member_id,
+            f"{parent['name'].replace(' 星座', '')}-{index + 1:02d}",
+            parent["category"],
+            config["country"],
+            config["operator"],
+            config["purpose"],
+            f"{parent['name']}的单星轨道条目。选择后显示该卫星相对于地球的当前轨迹。",
+            parent["orbit"]["period_minutes"],
+            parent["orbit"]["inclination_deg"],
+            parent["orbit"]["altitude_km"],
+            parent["_ground"]["base_longitude"],
+            parent["_ground"]["phase"] + index * (360 / max(1, count)),
+            orbit_class=parent["orbit"]["orbit_class"],
+            source_urls=parent["sources"],
+            subcategories=parent.get("subcategories", []),
+        )
+        member["parent_id"] = parent_id
+        member["is_constellation_member"] = True
+        members.append(member)
+    return members
+
+
+def _constellation_members(parent_id: str) -> list[dict[str, Any]]:
+    cached = _constellation_cache().get(parent_id)
+    if isinstance(cached, dict) and isinstance(cached.get("members"), list) and cached["members"]:
+        return [value for value in cached["members"] if isinstance(value, dict)]
+    return _seed_constellation_members(parent_id)
+
+
+def constellation_members(parent_id: str, limit: int = 80) -> dict[str, Any]:
+    if parent_id not in CONSTELLATION_GROUPS:
+        return {}
+    members = _constellation_members(parent_id)
+    selected = members[:max(1, min(limit, 200))]
+    items: list[dict[str, Any]] = []
+    for member in selected:
+        value = _public_record(member)
+        points = build_track(member, hours=2, step_minutes=3)
+        value["position"] = points[len(points) // 2] if points else None
+        value["track"] = [{"longitude": point["longitude"], "latitude": point["latitude"]} for point in points]
+        value["parent_id"] = parent_id
+        value["is_constellation_member"] = True
+        items.append(value)
+    return {"parent_id": parent_id, "items": items, "total": len(members), "updated_at": _constellation_cache().get(parent_id, {}).get("updated_at")}
+
+
+def _find_satellite(satellite_id: str) -> dict[str, Any] | None:
+    item = next((value for value in SATELLITES if value["id"] == satellite_id), None)
+    if item:
+        return item
+    for parent_id in CONSTELLATION_GROUPS:
+        item = next((value for value in _constellation_members(parent_id) if value.get("id") == satellite_id), None)
+        if item:
+            return item
+    return None
 
 
 def _public_record(item: dict[str, Any], include_track: bool = False) -> dict[str, Any]:
@@ -186,9 +278,11 @@ def list_satellites(keyword: str = "", category: str = "", limit: int = 80) -> d
     public_items = []
     for item in selected:
         value = _public_record(item)
-        points = build_track(item, hours=0, step_minutes=10)
+        if item.get("is_constellation"):
+            value["member_count"] = len(_constellation_members(item["id"]))
+        points = build_track(item, hours=0, step_minutes=2)
         value["position"] = points[len(points) // 2] if points else None
-        value["track"] = [{"longitude": point["longitude"], "latitude": point["latitude"]} for point in build_track(item, hours=2, step_minutes=15)]
+        value["track"] = [{"longitude": point["longitude"], "latitude": point["latitude"]} for point in build_track(item, hours=2, step_minutes=5)]
         public_items.append(value)
     return {
         "items": public_items,
@@ -200,17 +294,26 @@ def list_satellites(keyword: str = "", category: str = "", limit: int = 80) -> d
 
 
 def get_satellite(satellite_id: str) -> dict[str, Any] | None:
-    item = next((value for value in SATELLITES if value["id"] == satellite_id), None)
+    item = _find_satellite(satellite_id)
     if not item:
         return None
     item = _merged_item(item)
-    value = _public_record(item, include_track=True)
+    value = _public_record(item)
+    value["track"] = build_track(item, hours=6, step_minutes=2)
     points = value.get("track") or []
     value["position"] = points[len(points) // 2] if points else None
     return value
 
 
-def build_track(item: dict[str, Any], hours: float = 4, step_minutes: int = 10) -> list[dict[str, Any]]:
+def _gmst_radians(jd: float, fr: float) -> float:
+    """将 SGP4 的 TEME 惯性坐标转换为相对地球的经度。"""
+    days = jd + fr - 2451545.0
+    centuries = days / 36525.0
+    degrees = 280.46061837 + 360.98564736629 * days + 0.000387933 * centuries**2 - centuries**3 / 38710000.0
+    return math.radians(degrees % 360.0)
+
+
+def build_track(item: dict[str, Any], hours: float = 4, step_minutes: int = 2) -> list[dict[str, Any]]:
     """根据轨道参数生成可视化轨迹。
 
     对 GEO 和日地 L1 使用简化模型；接入真实 OMM/TLE 后由同步器替换这里的
@@ -237,7 +340,7 @@ def build_track(item: dict[str, Any], hours: float = 4, step_minutes: int = 10) 
                 radius = math.sqrt(x * x + y * y + z * z)
                 points.append({
                     "time": value.isoformat(),
-                    "longitude": round(math.degrees(math.atan2(y, x)), 5),
+                    "longitude": round(math.degrees(math.atan2(y, x) - _gmst_radians(jd, fr)), 5),
                     "latitude": round(math.degrees(math.asin(max(-1, min(1, z / radius)))), 5),
                     "altitude_km": round(radius - 6378.137, 2),
                     "velocity_km_s": round(math.sqrt(sum(component * component for component in velocity)), 3),
@@ -249,9 +352,10 @@ def build_track(item: dict[str, Any], hours: float = 4, step_minutes: int = 10) 
     inclination = float(orbit["inclination_deg"] or 0)
     radius = float(orbit["altitude_km"] or 500)
     points: list[dict[str, Any]] = []
+    earth_rotation_period = 1436.067
     for minute in range(int(-hours * 60), int(hours * 60) + 1, max(1, step_minutes)):
         angle = float(item["_ground"]["phase"]) + 360.0 * minute / period
-        longitude = ((float(item["_ground"]["base_longitude"]) + angle + 180) % 360) - 180
+        longitude = ((float(item["_ground"]["base_longitude"]) + angle - 360.0 * minute / earth_rotation_period + 180) % 360) - 180
         latitude = max(-89.0, min(89.0, inclination * math.sin(math.radians(angle))))
         velocity = 2 * math.pi * (6378 + radius) / (period * 60) if radius < 50000 else 0.0
         points.append({
@@ -264,11 +368,79 @@ def build_track(item: dict[str, Any], hours: float = 4, step_minutes: int = 10) 
     return points
 
 
-def track(satellite_id: str, hours: float = 4, step_minutes: int = 10) -> dict[str, Any]:
-    item = next((value for value in SATELLITES if value["id"] == satellite_id), None)
+def track(satellite_id: str, hours: float = 6, step_minutes: int = 2) -> dict[str, Any]:
+    item = _find_satellite(satellite_id)
     if not item:
         return {}
     return {"id": item["id"], "name": item["name"], "points": build_track(item, hours, step_minutes), "source": item["orbit"]["source"]}
+
+
+async def refresh_constellation_members() -> int:
+    """同步星链和 OneWeb 的单星目录；轨道目录不可用时保留代表性种子条目。"""
+    cache = _constellation_cache()
+    updated = 0
+    async with httpx.AsyncClient(timeout=45, follow_redirects=True, headers={"User-Agent": "QingchuanSatellite/1.0"}) as client:
+        for parent_id, config in CONSTELLATION_GROUPS.items():
+            try:
+                response = await client.get(f"https://celestrak.org/NORAD/elements/gp.php?GROUP={config['group']}&FORMAT=JSON")
+                if response.status_code != 200:
+                    continue
+                payload = response.json()
+                if not isinstance(payload, list):
+                    continue
+                members: list[dict[str, Any]] = []
+                for index, data in enumerate(payload[:200]):
+                    if not isinstance(data, dict):
+                        continue
+                    try:
+                        norad_id = int(data.get("NORAD_CAT_ID"))
+                        mean_motion = float(data.get("MEAN_MOTION"))
+                        inclination = float(data.get("INCLINATION") or 0)
+                        eccentricity = float(data.get("ECCENTRICITY") or 0)
+                        semi_major = (398600.4418 / ((2 * math.pi * mean_motion / 86400) ** 2)) ** (1 / 3)
+                    except (TypeError, ValueError, ZeroDivisionError):
+                        continue
+                    member_id = f"{parent_id}:{norad_id}"
+                    member = _satellite(
+                        member_id,
+                        str(data.get("OBJECT_NAME") or f"{config['group'].title()}-{norad_id}"),
+                        next(item["category"] for item in SATELLITES if item["id"] == parent_id),
+                        config["country"],
+                        config["operator"],
+                        config["purpose"],
+                        f"{next(item['name'] for item in SATELLITES if item['id'] == parent_id)}的实时单星轨道条目。",
+                        1440 / mean_motion,
+                        inclination,
+                        semi_major - 6378.137,
+                        float(data.get("RA_OF_ASC_NODE") or 0) % 360 - 180,
+                        float(data.get("MEAN_ANOMALY") or index * 11),
+                        norad_id=norad_id,
+                        cospar_id=str(data.get("OBJECT_ID") or ""),
+                        orbit_class=next(item["orbit"]["orbit_class"] for item in SATELLITES if item["id"] == parent_id),
+                        source_urls=next(item["sources"] for item in SATELLITES if item["id"] == parent_id),
+                    )
+                    member["parent_id"] = parent_id
+                    member["is_constellation_member"] = True
+                    member["orbit"].update({
+                        "eccentricity": eccentricity,
+                        "apogee_km": round(semi_major * (1 + eccentricity) - 6378.137, 2),
+                        "perigee_km": round(semi_major * (1 - eccentricity) - 6378.137, 2),
+                        "epoch": data.get("EPOCH", ""),
+                        "source": "CelesTrak 星座 GP（实时同步）",
+                    })
+                    members.append(member)
+                if members:
+                    cache[parent_id] = {"updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "members": members}
+                    updated += len(members)
+            except Exception:
+                continue
+    if updated:
+        path = constellation_cache_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(path)
+    return updated
 
 
 async def refresh_orbit_parameters() -> int:
@@ -326,6 +498,7 @@ async def refresh_orbit_parameters() -> int:
 async def satellite_orbit_loop() -> None:
     while True:
         try:
+            await refresh_constellation_members()
             await refresh_orbit_parameters()
         except asyncio.CancelledError:
             raise

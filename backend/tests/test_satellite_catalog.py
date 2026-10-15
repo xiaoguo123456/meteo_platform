@@ -1,6 +1,6 @@
 import unittest
 
-from app.satellite_catalog import categories, get_satellite, list_satellites, track
+from app.satellite_catalog import categories, constellation_members, get_satellite, list_satellites, track
 
 
 class SatelliteCatalogTests(unittest.TestCase):
@@ -25,6 +25,18 @@ class SatelliteCatalogTests(unittest.TestCase):
         self.assertGreater(len(value["points"]), 5)
         self.assertLess(value["points"][0]["time"], value["points"][-1]["time"])
         self.assertIn("altitude_km", value["points"][0])
+
+    def test_geostationary_track_stays_fixed_relative_to_earth(self):
+        points = track("fy-4a", hours=2, step_minutes=2)["points"]
+        longitudes = [point["longitude"] for point in points]
+        self.assertLess(max(longitudes) - min(longitudes), 1.0)
+
+    def test_constellation_exposes_selectable_members(self):
+        value = constellation_members("starlink-group", limit=3)
+        self.assertEqual(value["total"], 24)
+        self.assertEqual(len(value["items"]), 3)
+        member_id = value["items"][0]["id"]
+        self.assertTrue(get_satellite(member_id)["track"])
 
 
 if __name__ == "__main__":

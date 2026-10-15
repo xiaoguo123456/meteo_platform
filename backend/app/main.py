@@ -17,7 +17,7 @@ from .satellite_service import latest_himawari, local_image_bounds, satellite_lo
 from .spatial_provider import SpatialDataError
 from .weather_service import WeatherDataError, get_weather_grid, get_weather_particles
 from .site_forecast import SiteCreate, _station, create_station, forecast as site_forecast, list_stations, satellite_radiation
-from .satellite_catalog import categories as satellite_categories, get_satellite, list_satellites, satellite_orbit_loop, track as satellite_track
+from .satellite_catalog import categories as satellite_categories, constellation_members, get_satellite, list_satellites, satellite_orbit_loop, track as satellite_track
 
 
 settings = get_settings()
@@ -75,6 +75,14 @@ def satellite_category_list() -> list[dict[str, str]]:
     return satellite_categories()
 
 
+@app.get("/api/satellites/{satellite_id}/members")
+def satellite_members(satellite_id: str, limit: int = Query(default=80, ge=1, le=200)) -> dict[str, object]:
+    value = constellation_members(satellite_id, limit=limit)
+    if not value:
+        raise HTTPException(status_code=404, detail="该卫星不是可展开的星座条目")
+    return value
+
+
 @app.get("/api/satellites/{satellite_id}")
 def satellite_detail(satellite_id: str) -> dict[str, object]:
     value = get_satellite(satellite_id)
@@ -84,7 +92,7 @@ def satellite_detail(satellite_id: str) -> dict[str, object]:
 
 
 @app.get("/api/satellites/{satellite_id}/track")
-def satellite_orbit_track(satellite_id: str, hours: float = Query(default=4, ge=0.5, le=24), step_minutes: int = Query(default=10, ge=1, le=60)) -> dict[str, object]:
+def satellite_orbit_track(satellite_id: str, hours: float = Query(default=6, ge=0.5, le=24), step_minutes: int = Query(default=2, ge=1, le=60)) -> dict[str, object]:
     value = satellite_track(satellite_id, hours=hours, step_minutes=step_minutes)
     if not value:
         raise HTTPException(status_code=404, detail="卫星轨迹不存在")
