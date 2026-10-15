@@ -346,24 +346,7 @@ def build_track(item: dict[str, Any], hours: float = 4, step_minutes: int = 2, c
     # 静止卫星相对地面基本不移动。即使 TLE 传播出很小的经纬度摆动，
     # 页面也应以固定站点展示，避免把它误画成一条低轨卫星式轨迹。
     if orbit["orbit_class"] == "GEO":
-        tle = item.get("_tle")
-        if Satrec and jday and isinstance(tle, list) and len(tle) >= 2:
-            try:
-                satrec = Satrec.twoline2rv(tle[0], tle[1])
-                jd, fr = jday(now.year, now.month, now.day, now.hour, now.minute, now.second)
-                error, position, velocity = satrec.sgp4(jd, fr)
-                if not error:
-                    x, y, z = position
-                    radius = math.sqrt(x * x + y * y + z * z)
-                    return [{
-                        "time": now.isoformat(),
-                        "longitude": round((math.degrees(math.atan2(y, x) - _gmst_radians(jd, fr)) + 180) % 360 - 180, 5),
-                        "latitude": round(math.degrees(math.asin(max(-1, min(1, z / radius)))), 5),
-                        "altitude_km": round(radius - 6378.137, 2),
-                        "velocity_km_s": round(math.sqrt(sum(component * component for component in velocity)), 3),
-                    }]
-            except Exception:
-                pass
+        # 页面上的 GEO 标记代表固定地面站点，不把 TLE 的小倾角摆动画成地表移动。
         return [{"time": now.isoformat(), "longitude": item["_ground"]["base_longitude"], "latitude": 0.0, "altitude_km": orbit["altitude_km"], "velocity_km_s": 0.0}]
     # 已同步 TLE 时使用真实 SGP4 传播；没有依赖或上游数据时才回退到参数轨迹。
     tle = item.get("_tle")

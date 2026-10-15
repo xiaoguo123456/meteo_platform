@@ -29,6 +29,8 @@ class SatelliteCatalogTests(unittest.TestCase):
     def test_geostationary_track_stays_fixed_relative_to_earth(self):
         points = track("fy-4a", hours=2, step_minutes=2)["points"]
         self.assertEqual(len(points), 1)
+        self.assertAlmostEqual(points[0]["longitude"], 104.7, places=2)
+        self.assertEqual(points[0]["latitude"], 0.0)
         longitudes = [point["longitude"] for point in points]
         self.assertLess(max(longitudes) - min(longitudes), 1.0)
 
