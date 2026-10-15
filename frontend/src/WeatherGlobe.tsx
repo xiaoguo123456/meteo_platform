@@ -46,24 +46,18 @@ export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satelli
    const selectedSatellite=satellitesRef.current.find(item=>item.id===selectedSatelliteRef.current);
    if(selectedSatellite){
     const points=selectedSatellite.track||[];
-    const fullProjected=geoOrthographic().rotate(rotation).translate([width/2,height/2]).scale(radius);
-    const frontPath=new Path2D(),backPath=new Path2D();
-    let frontDrawing=false,backDrawing=false,previousLongitude:number|undefined;
+    const frontPath=new Path2D();
+    let frontDrawing=false,previousLongitude:number|undefined;
     for(const point of points){
      const xy=projected([point.longitude,point.latitude]);
-     const all=fullProjected([point.longitude,point.latitude]);
      const crossesDateLine=previousLongitude!==undefined&&Math.abs(point.longitude-previousLongitude)>120;
-     if(!all||crossesDateLine){frontDrawing=false;backDrawing=false;previousLongitude=point.longitude;continue;}
+     if(!xy||crossesDateLine){frontDrawing=false;previousLongitude=point.longitude;continue;}
      if(xy){
-      backDrawing=false;
       if(!frontDrawing){frontPath.moveTo(xy[0],xy[1]);frontDrawing=true;}else frontPath.lineTo(xy[0],xy[1]);
-     }else{
-      frontDrawing=false;
-      if(!backDrawing){backPath.moveTo(all[0],all[1]);backDrawing=true;}else backPath.lineTo(all[0],all[1]);
      }
      previousLongitude=point.longitude;
     }
-    mctx.save();mctx.strokeStyle=selectedSatellite.color;mctx.lineWidth=1.8;mctx.stroke(frontPath);mctx.globalAlpha=.28;mctx.lineWidth=1.2;mctx.setLineDash([5,5]);mctx.stroke(backPath);mctx.restore();
+    mctx.strokeStyle=selectedSatellite.color;mctx.lineWidth=1.8;mctx.stroke(frontPath);
     const marker=projected([selectedSatellite.position.longitude,selectedSatellite.position.latitude]);if(marker){mctx.beginPath();mctx.arc(marker[0],marker[1],5,0,Math.PI*2);mctx.fillStyle=selectedSatellite.color;mctx.fill();mctx.strokeStyle='rgba(255,255,255,.95)';mctx.lineWidth=1.5;mctx.stroke();}
    }
    mctx.beginPath();mctx.arc(width/2,height/2,radius,0,2*Math.PI);mctx.strokeStyle='#718c92';mctx.stroke();};
