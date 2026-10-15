@@ -247,10 +247,22 @@ def _find_satellite(satellite_id: str) -> dict[str, Any] | None:
     return None
 
 
-def _orbit_window_hours(item: dict[str, Any]) -> float:
-    """默认展示一整圈轨道，避免低轨卫星重复绕地球很多圈。"""
+def _orbit_window_hours(item: dict[str, Any], orbits: int = 1) -> float:
+    """按轨道圈数计算时间窗口的一半。"""
     period = float(item.get("orbit", {}).get("period_minutes") or 90)
-    return min(12.0, max(0.5, period / 120.0))
+    return min(24.0, max(0.5, period * max(1, orbits) / 120.0))
+
+
+def _parse_target_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("定位时间格式无效") from error
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).replace(second=0, microsecond=0)
 
 
 def _public_record(item: dict[str, Any], include_track: bool = False) -> dict[str, Any]:
@@ -288,7 +300,7 @@ def list_satellites(keyword: str = "", category: str = "", limit: int = 80) -> d
             value["member_count"] = len(_constellation_members(item["id"]))
         points = build_track(item, hours=0, step_minutes=2)
         value["position"] = points[len(points) // 2] if points else None
-        value["track"] = [{"longitude": point["longitude"], "latitude": point["latitude"]} for point in build_track(item, hours=_orbit_window_hours(item), step_minutes=2)]
+        value["track"] = [{"longitude": point["longitude"], "latitude": point["latitude"]} for point in build_track(item, step_minutes=2, orbits=1)]
         public_items.append(value)
     return {
         "items": public_items,
@@ -299,13 +311,14 @@ def list_satellites(keyword: str = "", category: str = "", limit: int = 80) -> d
     }
 
 
-def get_satellite(satellite_id: str) -> dict[str, Any] | None:
+def get_satellite(satellite_id: str, at: str | None = None, orbits: int = 3) -> dict[str, Any] | None:
     item = _find_satellite(satellite_id)
     if not item:
         return None
     item = _merged_item(item)
     value = _public_record(item)
-    value["track"] = build_track(item, hours=_orbit_window_hours(item), step_minutes=2)
+    target_time = _parse_target_time(at)
+    value["track"] = build_track(item, step_minutes=2, center_time=target_time, orbits=orbits)
     points = value.get("track") or []
     value["position"] = points[len(points) // 2] if points else None
     return value
@@ -319,7 +332,7 @@ def _gmst_radians(jd: float, fr: float) -> float:
     return math.radians(degrees % 360.0)
 
 
-def build_track(item: dict[str, Any], hours: float = 4, step_minutes: int = 2) -> list[dict[str, Any]]:
+def build_track(item: dict[str, Any], hours: float = 4, step_minutes: int = 2, center_time: datetime | None = None, orbits: int | None = None) -> list[dict[str, Any]]:
     """根据轨道参数生成可视化轨迹。
 
     对 GEO 和日地 L1 使用简化模型；接入真实 OMM/TLE 后由同步器替换这里的
@@ -327,7 +340,7 @@ def build_track(item: dict[str, Any], hours: float = 4, step_minutes: int = 2) -
     """
     item = _merged_item(item)
     orbit = item["orbit"]
-    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    now = (center_time or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(second=0, microsecond=0)
     if orbit["orbit_class"] == "日地 L1":
         return [{"time": now.isoformat(), "longitude": item["_ground"]["base_longitude"], "latitude": 0.0, "altitude_km": orbit["altitude_km"], "velocity_km_s": 0.0}]
     # 静止卫星相对地面基本不移动。即使 TLE 传播出很小的经纬度摆动，
@@ -358,7 +371,17 @@ def build_track(item: dict[str, Any], hours: float = 4, step_minutes: int = 2) -
         try:
             satrec = Satrec.twoline2rv(tle[0], tle[1])
             points: list[dict[str, Any]] = []
-            for minute in range(int(-hours * 60), int(hours * 60) + 1, max(1, step_minutes)):
+            # 轨道线表示当前时刻的闭合轨道面，而不是把地球自转也叠加进去的地面轨迹。
+            # 对整段采样使用同一个 GMST，首尾在一个周期后能够回到同一条轨道线上。
+            reference_jd, reference_fr = jday(now.year, now.month, now.day, now.hour, now.minute, now.second)
+            reference_gmst = _gmst_radians(reference_jd, reference_fr)
+            period = float(orbit["period_minutes"] or 90)
+            total_minutes = period * max(1, orbits) if orbits is not None else hours * 120
+            sample_count = max(2, math.ceil(total_minutes / max(1, step_minutes)))
+            if sample_count % 2:
+                sample_count += 1
+            offsets = (-total_minutes / 2 + total_minutes * index / sample_count for index in range(sample_count + 1))
+            for minute in offsets:
                 value = now + timedelta(minutes=minute)
                 jd, fr = jday(value.year, value.month, value.day, value.hour, value.minute, value.second)
                 error, position, velocity = satrec.sgp4(jd, fr)
@@ -368,7 +391,7 @@ def build_track(item: dict[str, Any], hours: float = 4, step_minutes: int = 2) -
                 radius = math.sqrt(x * x + y * y + z * z)
                 points.append({
                     "time": value.isoformat(),
-                    "longitude": round((math.degrees(math.atan2(y, x) - _gmst_radians(jd, fr)) + 180) % 360 - 180, 5),
+                    "longitude": round((math.degrees(math.atan2(y, x) - reference_gmst) + 180) % 360 - 180, 5),
                     "latitude": round(math.degrees(math.asin(max(-1, min(1, z / radius)))), 5),
                     "altitude_km": round(radius - 6378.137, 2),
                     "velocity_km_s": round(math.sqrt(sum(component * component for component in velocity)), 3),
@@ -380,10 +403,15 @@ def build_track(item: dict[str, Any], hours: float = 4, step_minutes: int = 2) -
     inclination = float(orbit["inclination_deg"] or 0)
     radius = float(orbit["altitude_km"] or 500)
     points: list[dict[str, Any]] = []
-    earth_rotation_period = 1436.067
-    for minute in range(int(-hours * 60), int(hours * 60) + 1, max(1, step_minutes)):
+    period = float(orbit["period_minutes"] or 90)
+    total_minutes = period * max(1, orbits) if orbits is not None else hours * 120
+    sample_count = max(2, math.ceil(total_minutes / max(1, step_minutes)))
+    if sample_count % 2:
+        sample_count += 1
+    offsets = (-total_minutes / 2 + total_minutes * index / sample_count for index in range(sample_count + 1))
+    for minute in offsets:
         angle = float(item["_ground"]["phase"]) + 360.0 * minute / period
-        longitude = ((float(item["_ground"]["base_longitude"]) + angle - 360.0 * minute / earth_rotation_period + 180) % 360) - 180
+        longitude = ((float(item["_ground"]["base_longitude"]) + angle + 180) % 360) - 180
         latitude = max(-89.0, min(89.0, inclination * math.sin(math.radians(angle))))
         velocity = 2 * math.pi * (6378 + radius) / (period * 60) if radius < 50000 else 0.0
         points.append({
@@ -396,11 +424,11 @@ def build_track(item: dict[str, Any], hours: float = 4, step_minutes: int = 2) -
     return points
 
 
-def track(satellite_id: str, hours: float = 6, step_minutes: int = 2) -> dict[str, Any]:
+def track(satellite_id: str, hours: float = 6, step_minutes: int = 2, at: str | None = None, orbits: int | None = None) -> dict[str, Any]:
     item = _find_satellite(satellite_id)
     if not item:
         return {}
-    return {"id": item["id"], "name": item["name"], "points": build_track(item, hours, step_minutes), "source": item["orbit"]["source"]}
+    return {"id": item["id"], "name": item["name"], "points": build_track(item, hours, step_minutes, center_time=_parse_target_time(at), orbits=orbits), "source": item["orbit"]["source"]}
 
 
 async def refresh_constellation_members() -> int:

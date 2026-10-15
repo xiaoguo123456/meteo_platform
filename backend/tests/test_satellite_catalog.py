@@ -39,6 +39,12 @@ class SatelliteCatalogTests(unittest.TestCase):
         member_id = value["items"][0]["id"]
         self.assertTrue(get_satellite(member_id)["track"])
 
+    def test_detail_supports_time_position_and_multiple_orbits(self):
+        value = get_satellite("iss", at="2026-10-15T08:30:00Z", orbits=3)
+        self.assertIsNotNone(value)
+        self.assertGreater(len(value["track"]), 100)
+        self.assertEqual(value["track"][len(value["track"]) // 2]["time"], "2026-10-15T08:30:00+00:00")
+
 
 if __name__ == "__main__":
     unittest.main()

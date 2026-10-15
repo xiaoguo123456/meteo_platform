@@ -44,7 +44,28 @@ export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satelli
   const drawMap=()=>{if(!displayed)return;const {rotation,radius,field}=displayed;const projected=geoOrthographic().rotate(rotation).translate([width/2,height/2]).scale(radius).clipAngle(90);mctx.clearRect(0,0,width,height);const path=geoPath(projected,mctx);mctx.beginPath();path(geoGraticule10());mctx.strokeStyle=field&&field!=='wind'?'rgba(47,77,89,.13)':'rgba(174,191,238,.18)';mctx.lineWidth=.55;mctx.stroke();if(coast){mctx.beginPath();path(coast);mctx.strokeStyle=field&&field!=='wind'?'rgba(47,77,89,.5)':'rgba(187,205,255,.8)';mctx.lineWidth=.65;mctx.stroke();}if(provinces){mctx.beginPath();path(provinces);mctx.strokeStyle=field&&field!=='wind'?'rgba(35,61,67,.65)':'rgba(221,233,245,.8)';mctx.lineWidth=.7;mctx.stroke();}
    // 卫星轨迹绘制在边界之上；只渲染当前可见半球，避免轨迹“飘”在地球背面。
    const selectedSatellite=satellitesRef.current.find(item=>item.id===selectedSatelliteRef.current);
-   if(selectedSatellite){const points=selectedSatellite.track||[];mctx.beginPath();let drawing=false;let previousLongitude:number|undefined;for(const point of points){const xy=projected([point.longitude,point.latitude]);const crossesDateLine=previousLongitude!==undefined&&Math.abs(point.longitude-previousLongitude)>120;if(!xy||crossesDateLine)drawing=false;if(xy&&!crossesDateLine){if(!drawing){mctx.moveTo(xy[0],xy[1]);drawing=true;}else mctx.lineTo(xy[0],xy[1]);}previousLongitude=point.longitude;}mctx.strokeStyle=selectedSatellite.color;mctx.lineWidth=1.8;mctx.stroke();const marker=projected([selectedSatellite.position.longitude,selectedSatellite.position.latitude]);if(marker){mctx.beginPath();mctx.arc(marker[0],marker[1],5,0,Math.PI*2);mctx.fillStyle=selectedSatellite.color;mctx.fill();mctx.strokeStyle='rgba(255,255,255,.95)';mctx.lineWidth=1.5;mctx.stroke();}}
+   if(selectedSatellite){
+    const points=selectedSatellite.track||[];
+    const fullProjected=geoOrthographic().rotate(rotation).translate([width/2,height/2]).scale(radius);
+    const frontPath=new Path2D(),backPath=new Path2D();
+    let frontDrawing=false,backDrawing=false,previousLongitude:number|undefined;
+    for(const point of points){
+     const xy=projected([point.longitude,point.latitude]);
+     const all=fullProjected([point.longitude,point.latitude]);
+     const crossesDateLine=previousLongitude!==undefined&&Math.abs(point.longitude-previousLongitude)>120;
+     if(!all||crossesDateLine){frontDrawing=false;backDrawing=false;previousLongitude=point.longitude;continue;}
+     if(xy){
+      backDrawing=false;
+      if(!frontDrawing){frontPath.moveTo(xy[0],xy[1]);frontDrawing=true;}else frontPath.lineTo(xy[0],xy[1]);
+     }else{
+      frontDrawing=false;
+      if(!backDrawing){backPath.moveTo(all[0],all[1]);backDrawing=true;}else backPath.lineTo(all[0],all[1]);
+     }
+     previousLongitude=point.longitude;
+    }
+    mctx.save();mctx.strokeStyle=selectedSatellite.color;mctx.lineWidth=1.8;mctx.stroke(frontPath);mctx.globalAlpha=.28;mctx.lineWidth=1.2;mctx.setLineDash([5,5]);mctx.stroke(backPath);mctx.restore();
+    const marker=projected([selectedSatellite.position.longitude,selectedSatellite.position.latitude]);if(marker){mctx.beginPath();mctx.arc(marker[0],marker[1],5,0,Math.PI*2);mctx.fillStyle=selectedSatellite.color;mctx.fill();mctx.strokeStyle='rgba(255,255,255,.95)';mctx.lineWidth=1.5;mctx.stroke();}
+   }
    mctx.beginPath();mctx.arc(width/2,height/2,radius,0,2*Math.PI);mctx.strokeStyle='#718c92';mctx.stroke();};
   const submit=()=>{if(busy||!pending||disposed)return;busy=true;worker.postMessage(pending);pending=null;};
   let reported='';

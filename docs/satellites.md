@@ -5,7 +5,8 @@
 卫星轨迹第一版包含：
 
 - 代表性卫星和星座目录，支持按类型、名称筛选；
-- 轨道位置、当前选中卫星的单条轨迹线和地球视图点击选择；
+- 轨道位置、当前选中卫星的多圈轨道线和地球视图点击选择；
+- 支持输入定位时间，并选择显示 1、3 或 5 圈轨道；
 - Starlink、OneWeb 等星座可展开为单星列表，选择单星后只绘制该单星轨迹；
 - 轨道类别、周期、倾角、高度、运营方、发射时间和任务简介；
 - 资料来源链接和大模型整理字段；
@@ -17,8 +18,8 @@
 GET /api/satellites?category=weather&keyword=风云&limit=80
 GET /api/satellites/categories
 GET /api/satellites/{id}/members?limit=80
-GET /api/satellites/{id}
-GET /api/satellites/{id}/track?hours=4&step_minutes=10
+GET /api/satellites/{id}?at=2026-10-15T08:30:00Z&orbits=3
+GET /api/satellites/{id}/track?hours=4&step_minutes=10&at=2026-10-15T08:30:00Z&orbits=3
 ```
 
 `backend/app/satellite_catalog.py` 中的 `SATELLITES` 是可扩展种子目录。每个条目都包含 `orbit`、`sources` 和 `ai` 三部分，后续同步 CelesTrak/Space-Track 的 OMM 或 TLE 时，只替换轨道字段即可，不需要修改前端。
@@ -54,4 +55,4 @@ PYTHONPATH=backend python -m app.satellite_ai --limit 8
 
 分类配置已经覆盖气象、遥感、海洋、通信、低轨互联网、导航、空间科学、空间天气、测绘与地球物理、载人、搜救与中继、技术验证、教育与业余无线电、安全与侦察、轨道目标等类型。新增卫星或星座只增加目录条目，新增类型只增加 `CATEGORIES` 配置。
 
-后端启动后会每 6 小时从 CelesTrak 更新有 NORAD 编号条目的 OMM 和 TLE，并同步 Starlink、OneWeb 的单星目录。安装 `sgp4` 后，轨迹使用真实 SGP4 传播并转换为相对地球的地面经度；上游或依赖暂不可用时保留目录参数轨迹，并在接口的 `orbit.source` 中区分同步状态。轨迹采样默认 2 分钟，并在前端跨越日期变更线时断线，避免出现不真实的长直线。
+后端启动后会每 6 小时从 CelesTrak 更新有 NORAD 编号条目的 OMM 和 TLE，并同步 Starlink、OneWeb 的单星目录。安装 `sgp4` 后，轨迹使用真实 SGP4 传播，并以定位时刻的地球姿态生成闭合轨道投影；上游或依赖暂不可用时保留目录参数轨迹，并在接口的 `orbit.source` 中区分同步状态。轨道线支持按圈数采样，前端只将地球背面显示为淡虚线，避免误认为轨道断裂。

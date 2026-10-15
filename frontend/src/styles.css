@@ -67,6 +67,10 @@ button:focus-visible { outline:2px solid #367a80; outline-offset:5px; border-rad
 .satellite-filters input{flex:1;}
 .satellite-filters select{width:104px;}
 .satellite-filters input:focus,.satellite-filters select:focus{border-color:#6f9da0;box-shadow:0 0 0 2px #79a7aa22;}
+.satellite-orbit-controls{display:grid;grid-template-columns:minmax(0,1fr) 88px;gap:7px;margin:7px 0 9px;}
+.satellite-orbit-controls label{display:grid;gap:3px;color:#789097;font-size:9px;}
+.satellite-orbit-controls input,.satellite-orbit-controls select{width:100%;min-width:0;height:28px;border:1px solid #d0dfe0;border-radius:5px;background:#fff;color:#395860;padding:0 7px;font-size:10px;outline:none;}
+.satellite-orbit-controls input:focus,.satellite-orbit-controls select:focus{border-color:#6f9da0;box-shadow:0 0 0 2px #79a7aa22;}
 .satellite-list{display:grid;grid-template-columns:1fr 1fr;gap:3px 7px;max-height:310px;overflow:auto;margin-bottom:11px;padding-right:2px;}
 .satellite-list-item{display:flex;align-items:center;gap:7px;min-width:0;padding:7px 6px;border:1px solid transparent;border-radius:5px;background:rgba(255,255,255,.48);text-align:left;color:#3b5961;}
 .satellite-list-item:hover,.satellite-list-item.active{border-color:#bad2d3;background:#eaf3f2;}

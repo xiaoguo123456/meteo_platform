@@ -109,16 +109,22 @@ def satellite_members(satellite_id: str, limit: int = Query(default=80, ge=1, le
 
 
 @app.get("/api/satellites/{satellite_id}")
-def satellite_detail(satellite_id: str) -> dict[str, object]:
-    value = get_satellite(satellite_id)
+def satellite_detail(satellite_id: str, at: Optional[str] = Query(default=None, max_length=40), orbits: int = Query(default=3, ge=1, le=5)) -> dict[str, object]:
+    try:
+        value = get_satellite(satellite_id, at=at, orbits=orbits)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     if not value:
         raise HTTPException(status_code=404, detail="卫星资料不存在")
     return value
 
 
 @app.get("/api/satellites/{satellite_id}/track")
-def satellite_orbit_track(satellite_id: str, hours: float = Query(default=6, ge=0.5, le=24), step_minutes: int = Query(default=2, ge=1, le=60)) -> dict[str, object]:
-    value = satellite_track(satellite_id, hours=hours, step_minutes=step_minutes)
+def satellite_orbit_track(satellite_id: str, hours: float = Query(default=6, ge=0.5, le=24), step_minutes: int = Query(default=2, ge=1, le=60), at: Optional[str] = Query(default=None, max_length=40), orbits: Optional[int] = Query(default=None, ge=1, le=5)) -> dict[str, object]:
+    try:
+        value = satellite_track(satellite_id, hours=hours, step_minutes=step_minutes, at=at, orbits=orbits)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     if not value:
         raise HTTPException(status_code=404, detail="卫星轨迹不存在")
     return value

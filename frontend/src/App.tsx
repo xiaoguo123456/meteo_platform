@@ -14,6 +14,7 @@ import { fields, type Grid } from './windMath';
 type Batch={model:string;run_time:string|null;times:string[];field_times?:Record<string,string[]>;total:number;state:string;error:string|null};
 type SatelliteMode='observation'|'orbit'|false;
 const formatTime=(iso:string|null|undefined)=>iso?new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(iso)).replace(/\//g,'-'):'—';
+const localOrbitInput=()=>{const value=new Date();value.setSeconds(0,0);const offset=value.getTimezoneOffset();return new Date(value.getTime()-offset*60000).toISOString().slice(0,16);};
 function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
  const playbackWait=useRef(0);
  const [satellite,setSatellite]=useState<EarthTexture|null>(null);
@@ -22,11 +23,12 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
  const [viewport,setViewport]=useState<Viewport|null>(null),[waiting,setWaiting]=useState(false);
  const [batch,setBatch]=useState<Batch|null>(null),[index,setIndex]=useState(0),[playing,setPlaying]=useState(false),[syncError,setSyncError]=useState('');
  const [satellites,setSatellites]=useState<SatelliteSummary[]>([]),[selectedSatelliteId,setSelectedSatelliteId]=useState(''),[satelliteDetail,setSatelliteDetail]=useState<SatelliteDetail|null>(null);
+ const [orbitAt,setOrbitAt]=useState(localOrbitInput),[orbitCount,setOrbitCount]=useState(3);
  useEffect(()=>{const timer=setTimeout(()=>void warmSatellite(),3000);return()=>clearTimeout(timer);},[]);
  const satelliteOrbitMode=satelliteMode==='orbit';
  const satelliteObservationMode=satelliteMode==='observation';
  useEffect(()=>{if(!satelliteOrbitMode)return;let active=true;const abort=new AbortController();fetch('/api/satellites?limit=120',{signal:abort.signal}).then(async r=>{if(!r.ok)throw new Error('卫星目录读取失败');return r.json()}).then(body=>{if(active){setSatellites(body.items||[]);if(!selectedSatelliteId&&body.items?.[0])setSelectedSatelliteId(body.items[0].id);}}).catch(()=>{});return()=>{active=false;abort.abort();};},[satelliteOrbitMode]);
- useEffect(()=>{if(!satelliteOrbitMode||!selectedSatelliteId)return;let active=true;const abort=new AbortController();const read=()=>fetch(`/api/satellites/${encodeURIComponent(selectedSatelliteId)}`,{signal:abort.signal}).then(async r=>{if(!r.ok)throw new Error('卫星资料读取失败');return r.json()}).then(value=>{if(active)setSatelliteDetail(value)}).catch(()=>{if(active)setSatelliteDetail(null)});void read();const timer=setInterval(()=>void read(),30000);return()=>{active=false;abort.abort();clearInterval(timer);};},[satelliteOrbitMode,selectedSatelliteId]);
+ useEffect(()=>{if(!satelliteOrbitMode||!selectedSatelliteId)return;let active=true;const abort=new AbortController();const params=new URLSearchParams({orbits:String(orbitCount)});if(orbitAt){const parsed=new Date(orbitAt);if(!Number.isNaN(parsed.getTime()))params.set('at',parsed.toISOString());}const read=()=>fetch(`/api/satellites/${encodeURIComponent(selectedSatelliteId)}?${params}`,{signal:abort.signal}).then(async r=>{if(!r.ok)throw new Error('卫星资料读取失败');return r.json()}).then(value=>{if(active)setSatelliteDetail(value)}).catch(()=>{if(active)setSatelliteDetail(null)});void read();const timer=setInterval(()=>void read(),30000);return()=>{active=false;abort.abort();clearInterval(timer);};},[satelliteOrbitMode,selectedSatelliteId,orbitAt,orbitCount]);
  useEffect(()=>{
   let active=true;const abort=new AbortController();setBatch(null);setIndex(0);setPlaying(false);setSyncError('');
   const poll=async()=>{try{
@@ -97,7 +99,7 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
   {!satelliteMode&&point&&run&&availableFields.length>0&&<PointForecast point={point} model={model} run={run} available={availableFields} onClose={()=>setPoint(null)}/>}
 
   {!satelliteMode&&status&&<div role="status" className={`load-status ${error||syncError?'error':''}`}>{status}</div>}
-  {satelliteObservationMode?<div className="satellite-modules"><SatelliteObservationPanel onTexture={setSatellite}/></div>:satelliteOrbitMode?<div className="satellite-modules"><SatelliteOrbitPanel satellites={satellites} selectedId={selectedSatelliteId} detail={satelliteDetail} onSelect={setSelectedSatelliteId}/></div>:<aside className="control-panel">
+  {satelliteObservationMode?<div className="satellite-modules"><SatelliteObservationPanel onTexture={setSatellite}/></div>:satelliteOrbitMode?<div className="satellite-modules"><SatelliteOrbitPanel satellites={satellites} selectedId={selectedSatelliteId} detail={satelliteDetail} onSelect={setSelectedSatelliteId} orbitAt={orbitAt} orbitCount={orbitCount} onOrbitAtChange={setOrbitAt} onOrbitCountChange={setOrbitCount}/></div>:<aside className="control-panel">
    <div className="control-line"><span className="control-key">模式</span><div className="choice-row">{['gfs','grapes','ifs','aifs'].map(m=><button key={m} className={`choice ${model===m?'active':''}`} onClick={()=>setModel(m)}>{m.toUpperCase()}</button>)}</div></div>
    <div className="control-line"><span className="control-key">要素</span><div className="choice-row">{Object.entries(fields).filter(([id])=>availableFields.includes(id)).map(([id,item])=><button key={id} className={`choice ${field===id?'active':''}`} onClick={()=>{setField(id);setIndex(0);setPlaying(false);}}>{item.label}</button>)}</div></div>
    {grid&&<div className="control-line"><span className="control-key">层次</span><span className="choice">{grid.meta.level}{grid.meta.field==='precipitation'&&grid.meta.interval_start?`（${formatTime(grid.meta.interval_start)}—${formatTime(grid.meta.valid_time)}）`:''}</span></div>}
