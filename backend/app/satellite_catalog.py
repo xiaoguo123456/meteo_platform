@@ -340,7 +340,7 @@ def build_track(item: dict[str, Any], hours: float = 4, step_minutes: int = 2) -
                 radius = math.sqrt(x * x + y * y + z * z)
                 points.append({
                     "time": value.isoformat(),
-                    "longitude": round(math.degrees(math.atan2(y, x) - _gmst_radians(jd, fr)), 5),
+                    "longitude": round((math.degrees(math.atan2(y, x) - _gmst_radians(jd, fr)) + 180) % 360 - 180, 5),
                     "latitude": round(math.degrees(math.asin(max(-1, min(1, z / radius)))), 5),
                     "altitude_km": round(radius - 6378.137, 2),
                     "velocity_km_s": round(math.sqrt(sum(component * component for component in velocity)), 3),
