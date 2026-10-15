@@ -1,6 +1,6 @@
 import NewsPage from './NewsPage';
 import StationForecast from './StationForecast';
-import SatellitePanel, {warmSatellite, type SatelliteDetail, type SatelliteSummary} from './SatellitePanel';
+import {SatelliteObservationPanel, SatelliteOrbitPanel, warmSatellite, type SatelliteDetail, type SatelliteSummary} from './SatellitePanel';
 import type {EarthTexture} from './basemap';
 import { useEffect, useState, useRef } from 'react';
 import PointForecast from './PointForecast';
@@ -12,8 +12,9 @@ import type { Viewport } from './viewTiles';
 import { fields, type Grid } from './windMath';
 
 type Batch={model:string;run_time:string|null;times:string[];field_times?:Record<string,string[]>;total:number;state:string;error:string|null};
+type SatelliteMode='observation'|'orbit'|false;
 const formatTime=(iso:string|null|undefined)=>iso?new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(iso)).replace(/\//g,'-'):'—';
-function WeatherApp({satelliteMode}:{satelliteMode:boolean}) {
+function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
  const playbackWait=useRef(0);
  const [satellite,setSatellite]=useState<EarthTexture|null>(null);
  const [point,setPoint]=useState<[number,number]|null>(null);
@@ -22,8 +23,10 @@ function WeatherApp({satelliteMode}:{satelliteMode:boolean}) {
  const [batch,setBatch]=useState<Batch|null>(null),[index,setIndex]=useState(0),[playing,setPlaying]=useState(false),[syncError,setSyncError]=useState('');
  const [satellites,setSatellites]=useState<SatelliteSummary[]>([]),[selectedSatelliteId,setSelectedSatelliteId]=useState(''),[satelliteDetail,setSatelliteDetail]=useState<SatelliteDetail|null>(null);
  useEffect(()=>{const timer=setTimeout(()=>void warmSatellite(),3000);return()=>clearTimeout(timer);},[]);
- useEffect(()=>{if(!satelliteMode)return;let active=true;const abort=new AbortController();fetch('/api/satellites?limit=120',{signal:abort.signal}).then(async r=>{if(!r.ok)throw new Error('卫星目录读取失败');return r.json()}).then(body=>{if(active){setSatellites(body.items||[]);if(!selectedSatelliteId&&body.items?.[0])setSelectedSatelliteId(body.items[0].id);}}).catch(()=>{});return()=>{active=false;abort.abort();};},[satelliteMode]);
- useEffect(()=>{if(!satelliteMode||!selectedSatelliteId)return;let active=true;const abort=new AbortController();fetch(`/api/satellites/${encodeURIComponent(selectedSatelliteId)}`,{signal:abort.signal}).then(async r=>{if(!r.ok)throw new Error('卫星资料读取失败');return r.json()}).then(value=>{if(active)setSatelliteDetail(value)}).catch(()=>{if(active)setSatelliteDetail(null)});return()=>{active=false;abort.abort();};},[satelliteMode,selectedSatelliteId]);
+ const satelliteOrbitMode=satelliteMode==='orbit';
+ const satelliteObservationMode=satelliteMode==='observation';
+ useEffect(()=>{if(!satelliteOrbitMode)return;let active=true;const abort=new AbortController();fetch('/api/satellites?limit=120',{signal:abort.signal}).then(async r=>{if(!r.ok)throw new Error('卫星目录读取失败');return r.json()}).then(body=>{if(active){setSatellites(body.items||[]);if(!selectedSatelliteId&&body.items?.[0])setSelectedSatelliteId(body.items[0].id);}}).catch(()=>{});return()=>{active=false;abort.abort();};},[satelliteOrbitMode]);
+ useEffect(()=>{if(!satelliteOrbitMode||!selectedSatelliteId)return;let active=true;const abort=new AbortController();fetch(`/api/satellites/${encodeURIComponent(selectedSatelliteId)}`,{signal:abort.signal}).then(async r=>{if(!r.ok)throw new Error('卫星资料读取失败');return r.json()}).then(value=>{if(active)setSatelliteDetail(value)}).catch(()=>{if(active)setSatelliteDetail(null)});return()=>{active=false;abort.abort();};},[satelliteOrbitMode,selectedSatelliteId]);
  useEffect(()=>{
   let active=true;const abort=new AbortController();setBatch(null);setIndex(0);setPlaying(false);setSyncError('');
   const poll=async()=>{try{
@@ -90,11 +93,11 @@ function WeatherApp({satelliteMode}:{satelliteMode:boolean}) {
  if(satelliteDetail){const overlay=satelliteOverlays.find(item=>item.id===satelliteDetail.id);if(overlay)overlay.track=(satelliteDetail.track||[]).map(point=>({longitude:point.longitude,latitude:point.latitude}));}
 
  return <div className="app-shell"><main className="weather-workspace">
-  <WeatherGlobe onPoint={p=>{if(!satelliteMode)setPoint(p);}} satellite={satelliteMode?satellite:null} onViewChange={setViewport} grid={satelliteMode?null:grid} animated={!satelliteMode&&grid?.meta.field==='wind'} satellites={satelliteMode?satelliteOverlays:[]} selectedSatelliteId={selectedSatelliteId} onSatelliteClick={satelliteMode?setSelectedSatelliteId:undefined}/>
+  <WeatherGlobe onPoint={p=>{if(!satelliteMode)setPoint(p);}} satellite={satelliteObservationMode?satellite:null} onViewChange={setViewport} grid={satelliteMode?null:grid} animated={!satelliteMode&&grid?.meta.field==='wind'} satellites={satelliteOrbitMode?satelliteOverlays:[]} selectedSatelliteId={satelliteOrbitMode?selectedSatelliteId:undefined} onSatelliteClick={satelliteOrbitMode?setSelectedSatelliteId:undefined}/>
   {!satelliteMode&&point&&run&&availableFields.length>0&&<PointForecast point={point} model={model} run={run} available={availableFields} onClose={()=>setPoint(null)}/>}
 
   {!satelliteMode&&status&&<div role="status" className={`load-status ${error||syncError?'error':''}`}>{status}</div>}
-  {satelliteMode?<SatellitePanel onTexture={setSatellite} satellites={satellites} selectedId={selectedSatelliteId} detail={satelliteDetail} onSelect={setSelectedSatelliteId}/>:<aside className="control-panel">
+  {satelliteObservationMode?<div className="satellite-modules"><SatelliteObservationPanel onTexture={setSatellite}/></div>:satelliteOrbitMode?<div className="satellite-modules"><SatelliteOrbitPanel satellites={satellites} selectedId={selectedSatelliteId} detail={satelliteDetail} onSelect={setSelectedSatelliteId}/></div>:<aside className="control-panel">
    <div className="control-line"><span className="control-key">模式</span><div className="choice-row">{['gfs','grapes','ifs','aifs'].map(m=><button key={m} className={`choice ${model===m?'active':''}`} onClick={()=>setModel(m)}>{m.toUpperCase()}</button>)}</div></div>
    <div className="control-line"><span className="control-key">要素</span><div className="choice-row">{Object.entries(fields).filter(([id])=>availableFields.includes(id)).map(([id,item])=><button key={id} className={`choice ${field===id?'active':''}`} onClick={()=>{setField(id);setIndex(0);setPlaying(false);}}>{item.label}</button>)}</div></div>
    {grid&&<div className="control-line"><span className="control-key">层次</span><span className="choice">{grid.meta.level}{grid.meta.field==='precipitation'&&grid.meta.interval_start?`（${formatTime(grid.meta.interval_start)}—${formatTime(grid.meta.valid_time)}）`:''}</span></div>}
@@ -104,13 +107,13 @@ function WeatherApp({satelliteMode}:{satelliteMode:boolean}) {
    <div className="panel-divider"/><div className="forecast-readout"><strong>{time}</strong><span>北京时间</span></div>
    {grid&&<div className="wind-legend"><div style={{background:gradient}}/>{ticks.map((n,i)=><span key={n} style={{position:'absolute',left:`${i*25}%`,transform:i===0?undefined:i===4?'translateX(-100%)':'translateX(-50%)'}}>{n}{i===4?` ${spec.unit}`:''}</span>)}</div>}
 
-  </aside>}<div className="data-credit">{satelliteMode?'JMA · Himawari-9':`Open-Meteo S3 · ${grid?.meta.dx ?? (model==='grapes'?0.125:0.25)}°`} / <a href="https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9" target="_blank" rel="noreferrer">{ESRI_CREDIT}</a> · <a href="https://docs.gmt-china.org/latest/dataset/CN-border/" target="_blank" rel="noreferrer">省界：GMT / 全国地理信息资源目录服务系统</a></div>
+ </aside>}<div className="data-credit">{satelliteObservationMode?'JMA · Himawari-9':satelliteOrbitMode?'CelesTrak 轨道参数':`Open-Meteo S3 · ${grid?.meta.dx ?? (model==='grapes'?0.125:0.25)}°`} / <a href="https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9" target="_blank" rel="noreferrer">{ESRI_CREDIT}</a> · <a href="https://docs.gmt-china.org/latest/dataset/CN-border/" target="_blank" rel="noreferrer">省界：GMT / 全国地理信息资源目录服务系统</a></div>
  </main></div>;
 }
 
 export default function App(){
- const getMode=()=>location.hash.startsWith('#news')?'news':location.hash==='#station'?'station':location.hash==='#satellite'?'satellite':'home';
+ const getMode=()=>location.hash.startsWith('#news')?'news':location.hash==='#station'?'station':location.hash==='#satellite'?'satellite':location.hash==='#observation'?'observation':'home';
  const [mode,setMode]=useState(getMode);
  useEffect(()=>{const changed=()=>setMode(getMode());addEventListener('hashchange',changed);return()=>removeEventListener('hashchange',changed);},[]);
- return <><header className="topbar"><span className="brand-name">晴川观象</span><nav aria-label="主导航">{[['home','首页'],['satellite','卫星轨迹'],['station','站点预测'],['news','资讯']].map(([id,title])=><button key={id} className={`nav-item ${mode===id?'nav-item-active':''}`} onClick={()=>{location.hash=id==='home'?'':id;setMode(id);}}>{title}</button>)}</nav></header>{mode==='news'?<NewsPage/>:mode==='station'?<StationForecast/>:<WeatherApp satelliteMode={mode==='satellite'}/>}</>;
+ return <><header className="topbar"><span className="brand-name">晴川观象</span><nav aria-label="主导航">{[['home','首页'],['observation','葵花卫星'],['satellite','卫星轨迹'],['station','站点预测'],['news','资讯']].map(([id,title])=><button key={id} className={`nav-item ${mode===id?'nav-item-active':''}`} onClick={()=>{location.hash=id==='home'?'':id;setMode(id);}}>{title}</button>)}</nav></header>{mode==='news'?<NewsPage/>:mode==='station'?<StationForecast/>:<WeatherApp satelliteMode={mode==='satellite'?'orbit':mode==='observation'?'observation':false}/>}</>;
 }
