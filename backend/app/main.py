@@ -12,6 +12,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 from .catalog import MODEL_CATALOG, VARIABLE_CATALOG
 from .config import get_settings
+from .basemap_service import ensure_world_imagery, warm_world_imagery
 from .schemas import BoundaryCollection, FieldManifest, ModelSummary
 from .satellite_service import latest_himawari, local_image_bounds, satellite_loop, station_image
 from .spatial_provider import SpatialDataError
@@ -26,17 +27,21 @@ async def lifespan(app):
     task = asyncio.create_task(sync_loop())
     satellite_task = asyncio.create_task(satellite_loop())
     orbit_task = asyncio.create_task(satellite_orbit_loop())
+    basemap_task = asyncio.create_task(warm_world_imagery())
     yield
     STOP.set()
     task.cancel()
     satellite_task.cancel()
     orbit_task.cancel()
+    basemap_task.cancel()
     with suppress(asyncio.CancelledError):
         await satellite_task
     with suppress(asyncio.CancelledError):
         await task
     with suppress(asyncio.CancelledError):
         await orbit_task
+    with suppress(asyncio.CancelledError):
+        await basemap_task
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
@@ -52,6 +57,26 @@ app.add_middleware(
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "meteo-api"}
+
+
+@app.get("/api/basemap/world-imagery")
+async def world_imagery_basemap():
+    """服务端缓存 Esri 全球影像，浏览器后续直接命中本地响应。"""
+    from fastapi.responses import FileResponse
+
+    try:
+        path, state = await ensure_world_imagery()
+        return FileResponse(
+            path,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "public, max-age=604800, stale-while-revalidate=86400",
+                "Content-Encoding": "identity",
+                "X-Basemap-Cache": state,
+            },
+        )
+    except (httpx.HTTPError, OSError, RuntimeError) as error:
+        raise HTTPException(status_code=503, detail=f"Esri 底图加载失败：{error}") from error
 
 
 @app.get("/api/models", response_model=list[ModelSummary])

@@ -1,8 +1,7 @@
-/** 官方无标注全球影像；保留浏览器正常 HTTP 缓存，不批量抓取瓦片。 */
+/** 官方无标注全球影像；由后端单机缓存，浏览器也按 HTTP 缓存复用。 */
 export type EarthTexture={width:number;height:number;pixels:Uint8ClampedArray};
 export const ESRI_CREDIT='Esri, Vantor, Earthstar Geographics, GIS User Community';
-const query=new URLSearchParams({bbox:'-180,-90,180,90',bboxSR:'4326',imageSR:'4326',size:'4096,2048',format:'jpg',f:'image'});
-export const ESRI_IMAGE_URL=`https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?${query}`;
+export const ESRI_IMAGE_URL='/api/basemap/world-imagery';
 let texture:Promise<EarthTexture>|null=null;
 export function loadEarthTexture():Promise<EarthTexture>{
  if(!texture)texture=(async()=>{
