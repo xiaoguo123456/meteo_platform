@@ -33,7 +33,7 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
  useEffect(()=>{
   let active=true;const abort=new AbortController();setBatch(null);setIndex(0);setPlaying(false);setSyncError('');
   const poll=async()=>{try{
-   const response=await fetch(`/api/models/${model}/runs`,{signal:abort.signal,cache:'no-store'});const body=await response.json();
+   const response=await fetch(`/api/models/${model}/runs`,{signal:abort.signal,cache:'default'});const body=await response.json();
    if(!response.ok)throw new Error(body.detail);
    if(active){setBatch(previous=>{if(previous?.run_time!==body.run_time){setIndex(0);setPlaying(false);}return body;});setSyncError(body.error||'');}
   }catch(e){if(active)setSyncError(e instanceof Error?e.message:'起报清单读取失败');}};
