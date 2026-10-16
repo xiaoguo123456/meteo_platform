@@ -70,14 +70,18 @@ jobs:
           docker ps -aq --filter label=com.docker.compose.project=qingchuan --filter label=com.docker.compose.service=frontend | xargs -r docker rm -f
           docker compose -f deploy/compose.yml up -d --build backend news-worker
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y nginx
+          DEBIAN_FRONTEND=noninteractive apt-get install -y nginx certbot
           install -d /var/www/qingchuan
           find /var/www/qingchuan -mindepth 1 -maxdepth 1 -exec rm -rf {} +
           cp -a frontend/dist/. /var/www/qingchuan/
-          install -D -m 644 deploy/nginx/qingchuan.conf /etc/nginx/sites-available/qingchuan
+          install -D -m 644 deploy/nginx/qingchuan-bootstrap.conf /etc/nginx/sites-available/qingchuan
           ln -sfn /etc/nginx/sites-available/qingchuan /etc/nginx/sites-enabled/qingchuan
           nginx -t
           systemctl enable --now nginx
+          systemctl reload nginx
+          certbot certonly --webroot -w /var/www/qingchuan -d meteo.weishenai.cn --cert-name meteo.weishenai.cn --non-interactive --agree-tos --register-unsafely-without-email --keep-until-expiring
+          install -D -m 644 deploy/nginx/qingchuan.conf /etc/nginx/sites-available/qingchuan
+          nginx -t
           systemctl reload nginx
           for i in $(seq 1 30); do
             if curl -fsS --max-time 3 http://127.0.0.1:8091/api/health >/dev/null; then break; fi
