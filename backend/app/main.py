@@ -174,6 +174,9 @@ def model_runs(model_id: str) -> dict[str, object]:
             read_status(model_id),
             headers={
                 "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                # 浏览器仍不保存起报清单，但允许 Cloudflare 边缘短暂复用，
+                # 避免多个页面每 10 秒都重新建立回源连接。
+                "CDN-Cache-Control": "max-age=10, stale-while-revalidate=30",
                 "Pragma": "no-cache",
             },
         )
