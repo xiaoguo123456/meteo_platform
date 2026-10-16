@@ -80,6 +80,12 @@ jobs:
           systemctl enable --now nginx
           systemctl reload nginx
           certbot certonly --webroot -w /var/www/qingchuan -d meteo.weishenai.cn --cert-name meteo.weishenai.cn --non-interactive --agree-tos --register-unsafely-without-email --keep-until-expiring
+          install -d /etc/letsencrypt/renewal-hooks/deploy
+          cat > /etc/letsencrypt/renewal-hooks/deploy/qingchuan-nginx-reload <<'HOOK'
+          #!/bin/sh
+          systemctl reload nginx
+          HOOK
+          chmod 755 /etc/letsencrypt/renewal-hooks/deploy/qingchuan-nginx-reload
           install -D -m 644 deploy/nginx/qingchuan.conf /etc/nginx/sites-available/qingchuan
           nginx -t
           systemctl reload nginx
