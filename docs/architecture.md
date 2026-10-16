@@ -15,6 +15,7 @@
 - 中国省级行政区划边界；
 - 模型、预报时效和天气要素切换；
 - 时间轴播放、暂停和拖动查看预报变化。
+- 面向新能源调度的站点功率预测、模型集合区间和短时爬坡预警。
 
 ## 2. 约束与设计原则
 
@@ -36,6 +37,7 @@
 单体后端服务（FastAPI）
   ├─ 天气查询 API
   ├─ 云图查询 API
+  ├─ 新能源站点与功率态势 API
   ├─ 省界、卫星轨迹与资料卡 API
   └─ 管理与健康检查 API
           │
@@ -210,6 +212,9 @@ GET /api/fields/{model}/{valid_time}/wind
 GET /api/cloud/latest
 GET /api/cloud/{source}/{time}
 GET /api/boundaries/provinces
+GET /api/site-stations
+GET /api/site-forecast
+GET /api/power-outlook
 ```
 
 天气场元数据示例：

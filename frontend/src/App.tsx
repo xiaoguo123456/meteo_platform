@@ -4,6 +4,7 @@ import {SatelliteObservationPanel, SatelliteOrbitPanel, warmSatellite, type Sate
 import type {EarthTexture} from './basemap';
 import { useEffect, useState, useRef } from 'react';
 import PointForecast from './PointForecast';
+import PowerOutlook from './PowerOutlook';
 import WeatherGlobe from './WeatherGlobe';
 import type { SatelliteOverlay } from './WeatherGlobe';
 import { ESRI_CREDIT } from './basemap';
@@ -120,8 +121,8 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
 }
 
 export default function App(){
- const getMode=()=>location.hash.startsWith('#news')?'news':location.hash==='#station'?'station':location.hash==='#satellite'?'satellite':location.hash==='#observation'?'observation':'home';
+ const getMode=()=>location.hash.startsWith('#news')?'news':location.hash==='#outlook'?'outlook':location.hash==='#station'?'station':location.hash==='#satellite'?'satellite':location.hash==='#observation'?'observation':'home';
  const [mode,setMode]=useState(getMode);
  useEffect(()=>{const changed=()=>setMode(getMode());addEventListener('hashchange',changed);return()=>removeEventListener('hashchange',changed);},[]);
- return <><header className="topbar"><span className="brand-name">晴川观象</span><nav aria-label="主导航">{[['home','首页'],['observation','葵花卫星'],['satellite','卫星轨迹'],['station','站点预测'],['news','资讯']].map(([id,title])=><button key={id} className={`nav-item ${mode===id?'nav-item-active':''}`} onClick={()=>{location.hash=id==='home'?'':id;setMode(id);}}>{title}</button>)}</nav></header>{mode==='news'?<NewsPage/>:mode==='station'?<StationForecast/>:<WeatherApp satelliteMode={mode==='satellite'?'orbit':mode==='observation'?'observation':false}/>}</>;
+ return <><header className="topbar"><span className="brand-name">晴川观象</span><nav aria-label="主导航">{[['home','首页'],['observation','葵花卫星'],['satellite','卫星轨迹'],['station','站点预测'],['outlook','新能源态势'],['news','资讯']].map(([id,title])=><button key={id} className={`nav-item ${mode===id?'nav-item-active':''}`} onClick={()=>{location.hash=id==='home'?'':id;setMode(id);}}>{title}</button>)}</nav></header>{mode==='news'?<NewsPage/>:mode==='outlook'?<PowerOutlook/>:mode==='station'?<StationForecast/>:<WeatherApp satelliteMode={mode==='satellite'?'orbit':mode==='observation'?'observation':false}/>}</>;
 }

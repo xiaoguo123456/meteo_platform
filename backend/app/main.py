@@ -17,7 +17,7 @@ from .schemas import BoundaryCollection, FieldManifest, ModelSummary
 from .satellite_service import latest_himawari, local_image_bounds, satellite_loop, station_image
 from .spatial_provider import SpatialDataError
 from .weather_service import WeatherDataError, get_weather_grid, get_weather_particles
-from .site_forecast import SiteCreate, _station, create_station, forecast as site_forecast, list_stations, satellite_radiation
+from .site_forecast import SiteCreate, _station, create_station, forecast as site_forecast, list_stations, power_outlook, satellite_radiation
 from .satellite_catalog import categories as satellite_categories, constellation_members, get_satellite, list_satellites, satellite_orbit_loop, track as satellite_track
 
 
@@ -182,6 +182,18 @@ async def site_satellite_data(station_id: str = "ningxia-solar") -> dict[str, ob
                 "CDN-Cache-Control": "max-age=300, stale-while-revalidate=300",
             },
         )
+    except (ValueError, RuntimeError, httpx.HTTPError) as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+@app.get("/api/power-outlook")
+async def power_outlook_data(
+    hours: int = Query(default=24, ge=6, le=48),
+    limit: int = Query(default=12, ge=1, le=24),
+) -> dict[str, object]:
+    """新能源态势：聚合精选站点的多模型功率区间和爬坡预警。"""
+    try:
+        return await power_outlook(hours=hours, limit=limit)
     except (ValueError, RuntimeError, httpx.HTTPError) as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 

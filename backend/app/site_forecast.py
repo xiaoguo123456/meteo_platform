@@ -34,6 +34,7 @@ MODEL_PARAMS = {
 }
 CATALOG_PATH = Path(__file__).with_name("site_catalog.json.gz")
 _SATELLITE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_POWER_OUTLOOK_CACHE: dict[tuple[int, int], tuple[float, dict[str, Any]]] = {}
 
 
 class SiteCreate(BaseModel):
@@ -117,6 +118,7 @@ def create_station(payload: SiteCreate) -> dict[str, Any]:
     temporary.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary.replace(path)
     _custom_rows.cache_clear()
+    _POWER_OUTLOOK_CACHE.clear()
     return row
 
 
@@ -211,4 +213,161 @@ async def satellite_radiation(station_id: str) -> dict[str, Any]:
         raise RuntimeError(f"自部署 Open-Meteo 卫星接口返回 {response.status_code}")
     result = _satellite_latest(response.json())
     _SATELLITE_CACHE[station_id] = (time.monotonic(), result)
+    return result
+
+
+def _median(values: list[float]) -> float:
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2
+
+
+def _ensemble(values: list[float], capacity_kw: float) -> tuple[float, float, float, int]:
+    """把四个模型的功率结果压成区间、中心值和一致性分数。"""
+    if not values:
+        raise ValueError("无法计算空的功率集合")
+    ordered = sorted(values)
+    low, high, center = ordered[0], ordered[-1], _median(ordered)
+    spread = (high - low) / max(capacity_kw, 1.0)
+    confidence = int(round(max(38.0, min(99.0, 98.0 - spread * 180.0))))
+    return round(low, 1), round(center, 1), round(high, 1), confidence
+
+
+def _outlook_stations(limit: int) -> list[dict[str, Any]]:
+    """态势页默认展示精选和自定义站点，避免首次打开就请求整个编目。"""
+    rows = _all_stations()
+    selected = [row for row in rows if row.get("is_featured") or row.get("is_custom")]
+    selected.sort(key=lambda row: (-float(row.get("capacity_kw") or 0), row.get("name", "")))
+    return selected[:limit]
+
+
+async def power_outlook(hours: int = 24, limit: int = 12) -> dict[str, Any]:
+    """汇总精选新能源站点，供新能源态势模块绘制区域功率和爬坡预警。"""
+    hours = max(6, min(hours, 48))
+    limit = max(1, min(limit, 24))
+    cache_key = (hours, limit)
+    cached = _POWER_OUTLOOK_CACHE.get(cache_key)
+    if cached and time.monotonic() - cached[0] < 300:
+        return cached[1]
+
+    stations = _outlook_stations(limit)
+    model_ids = tuple(MODEL_PARAMS)
+    semaphore = asyncio.Semaphore(6)
+
+    async def read_one(station: dict[str, Any], model: str):
+        async with semaphore:
+            try:
+                return station, model, await forecast(station["id"], model, include_satellite=False), None
+            except (ValueError, RuntimeError, httpx.HTTPError) as error:
+                return station, model, None, str(error)
+
+    reads = await asyncio.gather(*(read_one(station, model) for station in stations for model in model_ids))
+    grouped: dict[str, dict[str, dict[str, Any]]] = {station["id"]: {} for station in stations}
+    errors: list[str] = []
+    for station, model, result, error in reads:
+        if result is not None:
+            grouped[station["id"]][model] = result
+        elif error:
+            errors.append(f"{station['short_name']} {model.upper()}：{error}")
+
+    station_payloads: list[dict[str, Any]] = []
+    all_times: list[str] = []
+    for station in stations:
+        models = grouped[station["id"]]
+        if not models:
+            continue
+        base = next(iter(models.values()))
+        series = []
+        for index in range(hours):
+            timestamp = next((item.get("time") for item in base.get("hourly", [])[index:index + 1]), None)
+            values = [
+                float(item["hourly"][index]["power_kw"])
+                for item in models.values()
+                if index < len(item.get("hourly", [])) and item["hourly"][index].get("power_kw") is not None
+            ]
+            if not values or timestamp is None:
+                continue
+            low, center, high, confidence = _ensemble(values, float(station["capacity_kw"]))
+            ramp = 0.0 if not series else round(center - series[-1]["p50_kw"], 1)
+            series.append({"time": timestamp, "p10_kw": low, "p50_kw": center, "p90_kw": high, "ramp_kw": ramp, "confidence": confidence})
+            if timestamp not in all_times:
+                all_times.append(timestamp)
+        if not series:
+            continue
+        next_window = series[: min(7, len(series))]
+        ramp_item = max(next_window[1:] or next_window, key=lambda item: abs(item["ramp_kw"]))
+        current = series[0]
+        peak = max(item["p50_kw"] for item in series)
+        station_payloads.append({
+            "station": station,
+            "models": list(models),
+            "current_kw": current["p50_kw"],
+            "peak_kw": round(peak, 1),
+            "ramp_kw": ramp_item["ramp_kw"],
+            "ramp_time": ramp_item["time"],
+            "confidence": current["confidence"],
+            "series": series,
+        })
+
+    all_times = sorted(all_times)[:hours]
+    totals = []
+    for timestamp in all_times:
+        points = [next((item for item in station["series"] if item["time"] == timestamp), None) for station in station_payloads]
+        points = [item for item in points if item]
+        if not points:
+            continue
+        totals.append({
+            "time": timestamp,
+            "p10_kw": round(sum(item["p10_kw"] for item in points), 1),
+            "p50_kw": round(sum(item["p50_kw"] for item in points), 1),
+            "p90_kw": round(sum(item["p90_kw"] for item in points), 1),
+            "confidence": round(sum(item["confidence"] for item in points) / len(points)),
+        })
+    for index, item in enumerate(totals):
+        item["ramp_kw"] = 0.0 if index == 0 else round(item["p50_kw"] - totals[index - 1]["p50_kw"], 1)
+
+    alerts = []
+    for payload in station_payloads:
+        capacity = float(payload["station"]["capacity_kw"])
+        if abs(payload["ramp_kw"]) < max(1000.0, capacity * 0.08):
+            continue
+        direction = "上升" if payload["ramp_kw"] > 0 else "下降"
+        severity = "high" if abs(payload["ramp_kw"]) >= capacity * 0.2 else "medium"
+        alerts.append({
+            "station_id": payload["station"]["id"],
+            "station_name": payload["station"]["short_name"],
+            "type": payload["station"]["type"],
+            "time": payload["ramp_time"],
+            "direction": direction,
+            "ramp_kw": payload["ramp_kw"],
+            "ramp_mw": round(payload["ramp_kw"] / 1000, 1),
+            "confidence": payload["confidence"],
+            "severity": severity,
+            "message": f"{payload['station']['short_name']}未来窗口预计{direction} {abs(payload['ramp_kw']) / 1000:.1f} MW",
+        })
+    alerts.sort(key=lambda item: abs(item["ramp_kw"]), reverse=True)
+
+    capacity_kw = sum(float(item["station"]["capacity_kw"]) for item in station_payloads)
+    total_current = totals[0]["p50_kw"] if totals else 0.0
+    next_ramp = totals[1]["ramp_kw"] if len(totals) > 1 else 0.0
+    result = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "hours": hours,
+        "models": [{"id": key, "name": value["name"]} for key, value in MODEL_PARAMS.items()],
+        "station_count": len(station_payloads),
+        "errors": errors[:12],
+        "totals": {
+            "capacity_kw": round(capacity_kw, 1),
+            "current_kw": round(total_current, 1),
+            "next_ramp_kw": round(next_ramp, 1),
+            "peak_kw": round(max((item["p50_kw"] for item in totals), default=0.0), 1),
+            "confidence": totals[0]["confidence"] if totals else 0,
+            "series": totals,
+        },
+        "alerts": alerts[:8],
+        "stations": [{key: value for key, value in payload.items() if key != "models"} for payload in station_payloads],
+    }
+    _POWER_OUTLOOK_CACHE[cache_key] = (time.monotonic(), result)
     return result
