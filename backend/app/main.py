@@ -140,7 +140,14 @@ def site_stations(
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, object]:
     """EnerSight 风格的公开站点目录，站点预测不需要登录。"""
-    return list_stations(keyword=keyword, type_=type, province=province, sort=sort, limit=limit, offset=offset)
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        list_stations(keyword=keyword, type_=type, province=province, sort=sort, limit=limit, offset=offset),
+        headers={
+            "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=60",
+            "CDN-Cache-Control": "max-age=300, stale-while-revalidate=60",
+        },
+    )
 
 
 @app.post("/api/site-stations")
@@ -152,7 +159,14 @@ def create_site_station(payload: SiteCreate) -> dict[str, object]:
 @app.get("/api/site-forecast")
 async def site_forecast_data(station_id: str = "zhangbei-wind", model: str = "gfs") -> dict[str, object]:
     try:
-        return await site_forecast(station_id, model, include_satellite=False)
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            await site_forecast(station_id, model, include_satellite=False),
+            headers={
+                "Cache-Control": "public, max-age=0, s-maxage=30, stale-while-revalidate=60",
+                "CDN-Cache-Control": "max-age=30, stale-while-revalidate=60",
+            },
+        )
     except (ValueError, RuntimeError, httpx.HTTPError) as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
@@ -160,7 +174,14 @@ async def site_forecast_data(station_id: str = "zhangbei-wind", model: str = "gf
 @app.get("/api/site-satellite")
 async def site_satellite_data(station_id: str = "ningxia-solar") -> dict[str, object]:
     try:
-        return await satellite_radiation(station_id)
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            await satellite_radiation(station_id),
+            headers={
+                "Cache-Control": "public, max-age=0, s-maxage=300, stale-while-revalidate=300",
+                "CDN-Cache-Control": "max-age=300, stale-while-revalidate=300",
+            },
+        )
     except (ValueError, RuntimeError, httpx.HTTPError) as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
