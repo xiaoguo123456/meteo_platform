@@ -3,6 +3,8 @@ services:
   backend:
     build: ../backend
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
     environment:
       METEO_OPEN_METEO_BASE_URL: http://host.docker.internal:8090/v1/forecast
       METEO_OPEN_METEO_SATELLITE_BASE_URL: http://host.docker.internal:8090/v1/archive
@@ -29,25 +31,6 @@ services:
     logging:
       driver: json-file
       options: {max-size: "10m", max-file: "3"}
-  frontend:
-    build: ../frontend
-    restart: unless-stopped
-    ports:
-      - "8091:80"
-    depends_on:
-      backend: {condition: service_healthy}
-    mem_limit: 128m
-    cpus: "0.25"
-    pids_limit: 64
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    logging:
-      driver: json-file
-      options: {max-size: "10m", max-file: "3"}
-
   news-worker:
     build: ../backend
     restart: unless-stopped

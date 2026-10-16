@@ -2,11 +2,12 @@
 
 生产目录：`/opt/qingchuan`。Compose 文件：`deploy/compose.yml`，项目名 `qingchuan`。
 
-- 前端 Nginx：宿主机 8091 → 容器 80，提供静态页面并代理 `/api/`。
-- 后端 FastAPI：仅 Compose 内网 8000，不映射宿主机端口；单进程内启动后台预取。
+- 主机 Nginx：监听宿主机 8091，提供 `/var/www/qingchuan` 静态页面并代理 `/api/` 到 `127.0.0.1:8000`。
+- 后端 FastAPI：Docker 内运行，绑定宿主机 `127.0.0.1:8000`，不直接暴露公网；单进程内启动后台预取。
+- 前端不再运行独立 Docker 容器，部署流程在构建机生成 `frontend/dist` 后复制到主机 Nginx 目录。
 - 数据目录：`/opt/qingchuan/data/forecasts`，挂载到后端 `/data/forecasts`。
 - 与既有 `/opt/open-meteo`、8090 端口和 Open-Meteo 数据卷独立。
-- 后端 CPU 上限 1.25 核、内存 1200 MiB；前端 0.25 核、128 MiB。日志每服务最多 3×10 MB，自动重启与健康检查开启。
+- 后端 CPU 上限 1.25 核、内存 1200 MiB。日志每服务最多 3×10 MB，自动重启与健康检查开启。主机 Nginx 由 systemd 管理。
 
 ## 缓存预取
 
@@ -21,13 +22,15 @@ cd /opt/qingchuan
 docker compose -f deploy/compose.yml ps
 docker compose -f deploy/compose.yml logs --tail 100 backend
 docker compose -f deploy/compose.yml up -d --build
+nginx -t
+systemctl status nginx --no-pager
 curl http://127.0.0.1:8091/api/health
 curl http://127.0.0.1:8091/api/models/gfs/runs
 ```
 
-停止本项目：`docker compose -f deploy/compose.yml stop`。只影响 qingchuan 项目，不操作 open-meteo 项目。不执行全局 prune 或删除业务数据卷。
+停止本项目：`docker compose -f deploy/compose.yml stop`，再按需停止主机 Nginx。只影响 qingchuan 项目，不操作 open-meteo 项目。不执行全局 prune 或删除业务数据卷。
 
-当前入口使用 IP 和 HTTP，未配置域名及 HTTPS。源代码更新通过构建镜像生效；不把开发服务器部署到生产。
+当前入口使用 IP 和 HTTP，未配置域名及 HTTPS。域名接入时，在主机 Nginx 的 `deploy/nginx/qingchuan.conf` 中增加域名并由主机 Nginx 终止 HTTPS。源代码更新通过构建机生成静态文件和后端镜像生效；不把开发服务器部署到生产。
 
 ## 多模型核验
 
@@ -62,4 +65,4 @@ S3 预缓存增加 `.v2.gz` 浏览器响应文件：保留原始浮点值的字�
 
 公钥需要提前加入服务器 `/root/.ssh/authorized_keys`。私钥只进入 GitHub Actions Secret，不提交到仓库。部署包会排除 `backend/.env.news`、`data`、本地虚拟环境和构建产物，服务器上已有的模型缓存、资讯数据库和模型密钥会保留。
 
-部署完成后流程会等待 `http://127.0.0.1:8091/api/health` 返回成功，并输出晴川观象三个容器状态。Open-Meteo 服务使用独立 Compose 项目，不会被这条流程重启。
+部署完成后流程会等待 `http://127.0.0.1:8091/api/health` 返回成功，并输出后端和资讯 Worker 容器状态。主机 Nginx 由 systemd 管理。Open-Meteo 服务使用独立 Compose 项目，不会被这条流程重启。

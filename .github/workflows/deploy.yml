@@ -38,6 +38,13 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
+      - name: 构建前端静态文件
+        run: |
+          set -eu
+          cd frontend
+          npm ci
+          npm run build
+
       - name: 打包部署文件
         run: |
           tar --exclude='./.git' \
@@ -45,7 +52,6 @@ jobs:
               --exclude='./backend/.env.news' \
               --exclude='./backend/.venv' \
               --exclude='./frontend/node_modules' \
-              --exclude='./frontend/dist' \
               --exclude='./data' \
               -czf /tmp/qingchuan-release.tgz .
 
@@ -60,9 +66,19 @@ jobs:
           install -d "$DEPLOY_PATH"
           tar --no-overwrite-dir -xzf /tmp/qingchuan-release.tgz -C "$DEPLOY_PATH"
           cd "$DEPLOY_PATH"
-          docker compose -f deploy/compose.yml up -d --build backend news-worker frontend
-          # 后端重建后刷新 Nginx 的 Docker 上游地址，避免保留旧容器 IP。
-          docker compose -f deploy/compose.yml up -d --force-recreate frontend
+          # 前端原先由 Docker Nginx 提供；先移除旧容器，释放 8091 给主机 Nginx。
+          docker ps -aq --filter label=com.docker.compose.project=qingchuan --filter label=com.docker.compose.service=frontend | xargs -r docker rm -f
+          docker compose -f deploy/compose.yml up -d --build backend news-worker
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y nginx
+          install -d /var/www/qingchuan
+          find /var/www/qingchuan -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          cp -a frontend/dist/. /var/www/qingchuan/
+          install -D -m 644 deploy/nginx/qingchuan.conf /etc/nginx/sites-available/qingchuan
+          ln -sfn /etc/nginx/sites-available/qingchuan /etc/nginx/sites-enabled/qingchuan
+          nginx -t
+          systemctl enable --now nginx
+          systemctl reload nginx
           for i in $(seq 1 30); do
             if curl -fsS --max-time 3 http://127.0.0.1:8091/api/health >/dev/null; then break; fi
             sleep 2
