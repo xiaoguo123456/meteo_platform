@@ -1,0 +1,18 @@
+/* 区域态势图保持地理定位的秩序感，标签只承载站点名和当前值。 */
+.outlook-map{background:linear-gradient(145deg,#f5fbfa 0%,#e8f4f1 52%,#f8fbfa 100%);box-shadow:inset 0 1px 0 rgba(255,255,255,.7)}
+.outlook-map-grid{opacity:.38;background:linear-gradient(90deg,transparent 24.8%,#c7ddda 25%,transparent 25.2%,transparent 49.8%,#c7ddda 50%,transparent 50.2%,transparent 74.8%,#c7ddda 75%,transparent 75.2%),linear-gradient(0deg,transparent 24.8%,#c7ddda 25%,transparent 25.2%,transparent 49.8%,#c7ddda 50%,transparent 50.2%,transparent 74.8%,#c7ddda 75%,transparent 75.2%);mask-image:radial-gradient(ellipse at center,#000 25%,transparent 87%)}
+.outlook-map-meta{position:absolute;top:13px;right:16px;z-index:2;display:flex;align-items:baseline;gap:7px;color:#7b9799;font-size:10px}
+.outlook-map-meta strong{color:#2d7477;font:500 14px 'DM Mono',monospace}
+.outlook-map-meta small{font:400 9px system-ui;color:#7b9799}
+.outlook-map-contour{fill:none;stroke:#bad7d3;stroke-width:.45;stroke-dasharray:1.2 2.4;opacity:.72;vector-effect:non-scaling-stroke}
+.outlook-node{outline:none;cursor:pointer}
+.outlook-node-card rect{fill:rgba(249,253,252,.9);stroke:#bdd7d3;stroke-width:.35;vector-effect:non-scaling-stroke;transition:fill .18s ease,stroke .18s ease}
+.outlook-node-name{fill:#3b6f73;font:600 2.7px system-ui,'PingFang SC',sans-serif;letter-spacing:.02em}
+.outlook-node-value{fill:#789194;font:400 2.35px 'DM Mono',monospace}
+.outlook-node-ring{opacity:.24;stroke-width:.75;vector-effect:non-scaling-stroke;transition:opacity .18s ease,stroke-width .18s ease}
+.outlook-node.active .outlook-node-ring{opacity:.9;stroke-width:1.1;animation:outlookPulse 1.8s ease-out infinite}
+.outlook-node:hover .outlook-node-card rect,.outlook-node.active .outlook-node-card rect{fill:#e4f3ef;stroke:#4b9997}
+.outlook-node.active .outlook-node-name{fill:#22696d}
+.outlook-node:focus-visible .outlook-node-card rect{stroke:#28777b;stroke-width:.8}
+.outlook-map-axis{bottom:9px;color:#88a2a2;font-size:9px}
+@media(prefers-reduced-motion:reduce){.outlook-node.active .outlook-node-ring{animation:none}}
