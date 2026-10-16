@@ -48,7 +48,7 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
   if(satelliteMode||!viewport)return;
   if(!run||!valid){if(activeBatch?.state==='ready')setGrid(null);setLoading(false);return;}
   setLoading(true);const requestedAt=performance.now(),waitMs=playbackWait.current;playbackWait.current=0;
-  loadFrame(model,field,run,valid,viewport,false,data=>{if(active)setGrid(data);}).then(data=>{if(active)setGrid({...data,meta:{...data.meta,requestedAt,waitMs}});}).catch(e=>{if(active){setError(e.message);setPlaying(false);}}).finally(()=>{if(active)setLoading(false);});
+  loadFrame(model,field,run,valid,viewport,false,data=>{if(active){setGrid(data);if(data.meta.complete===false)setLoading(false);}}).then(data=>{if(active)setGrid({...data,meta:{...data.meta,requestedAt,waitMs}});}).catch(e=>{if(active){setError(e.message);setPlaying(false);}}).finally(()=>{if(active)setLoading(false);});
   return()=>{active=false;};
  },[model,field,run,valid,viewport,activeBatch?.state,satelliteMode]);
  // 只在视野或数据上下文变化时取消请求，播放推进不能打断后续帧预取。
