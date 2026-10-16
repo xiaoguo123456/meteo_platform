@@ -47,7 +47,7 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
  useEffect(()=>{
   let active=true;setError('');
   if(satelliteMode||!viewport)return;
-  if(!run||!valid){if(activeBatch?.state==='ready')setGrid(null);setLoading(false);return;}
+  if(!run||!valid){setGrid(null);setLoading(false);return;}
   setLoading(true);
   // 切换模型、要素或预报时刻时，不继续显示上一份数据，避免看起来像切换完成。
   setGrid(previous=>previous&&previous.meta.model===model&&previous.meta.field===field&&previous.meta.valid_time===valid?previous:null);
