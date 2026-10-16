@@ -24,9 +24,10 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
  const [batch,setBatch]=useState<Batch|null>(null),[index,setIndex]=useState(0),[playing,setPlaying]=useState(false),[syncError,setSyncError]=useState('');
  const [satellites,setSatellites]=useState<SatelliteSummary[]>([]),[selectedSatelliteId,setSelectedSatelliteId]=useState(''),[satelliteDetail,setSatelliteDetail]=useState<SatelliteDetail|null>(null);
  const [orbitAt,setOrbitAt]=useState(localOrbitInput),[orbitCount,setOrbitCount]=useState(3);
- useEffect(()=>{const timer=setTimeout(()=>void warmSatellite(),3000);return()=>clearTimeout(timer);},[]);
  const satelliteOrbitMode=satelliteMode==='orbit';
  const satelliteObservationMode=satelliteMode==='observation';
+ // 卫星观测页才需要预热葵花纹理；首页切换天气要素时不再抢占同一条连接。
+ useEffect(()=>{if(!satelliteObservationMode)return;const timer=setTimeout(()=>void warmSatellite(),3000);return()=>clearTimeout(timer);},[satelliteObservationMode]);
  useEffect(()=>{if(!satelliteOrbitMode)return;let active=true;const abort=new AbortController();fetch('/api/satellites?limit=120',{signal:abort.signal}).then(async r=>{if(!r.ok)throw new Error('卫星目录读取失败');return r.json()}).then(body=>{if(active){setSatellites(body.items||[]);if(!selectedSatelliteId&&body.items?.[0])setSelectedSatelliteId(body.items[0].id);}}).catch(()=>{});return()=>{active=false;abort.abort();};},[satelliteOrbitMode]);
  useEffect(()=>{if(!satelliteOrbitMode||!selectedSatelliteId)return;let active=true;const abort=new AbortController();const params=new URLSearchParams({orbits:String(orbitCount)});if(orbitAt){const parsed=new Date(orbitAt);if(!Number.isNaN(parsed.getTime()))params.set('at',parsed.toISOString());}const read=()=>fetch(`/api/satellites/${encodeURIComponent(selectedSatelliteId)}?${params}`,{signal:abort.signal}).then(async r=>{if(!r.ok)throw new Error('卫星资料读取失败');return r.json()}).then(value=>{if(active)setSatelliteDetail(value)}).catch(()=>{if(active)setSatelliteDetail(null)});void read();const timer=setInterval(()=>void read(),30000);return()=>{active=false;abort.abort();clearInterval(timer);};},[satelliteOrbitMode,selectedSatelliteId,orbitAt,orbitCount]);
  useEffect(()=>{
@@ -47,14 +48,19 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
   let active=true;setError('');
   if(satelliteMode||!viewport)return;
   if(!run||!valid){if(activeBatch?.state==='ready')setGrid(null);setLoading(false);return;}
-  setLoading(true);const requestedAt=performance.now(),waitMs=playbackWait.current;playbackWait.current=0;
-  loadFrame(model,field,run,valid,viewport,false,data=>{if(active){setGrid(data);if(data.meta.complete===false)setLoading(false);}}).then(data=>{if(active)setGrid({...data,meta:{...data.meta,requestedAt,waitMs}});}).catch(e=>{if(active){setError(e.message);setPlaying(false);}}).finally(()=>{if(active)setLoading(false);});
+  setLoading(true);
+  // 切换模型、要素或预报时刻时，不继续显示上一份数据，避免看起来像切换完成。
+  setGrid(previous=>previous&&previous.meta.model===model&&previous.meta.field===field&&previous.meta.valid_time===valid?previous:null);
+  const requestedAt=performance.now(),waitMs=playbackWait.current;playbackWait.current=0;
+  // 只有完整帧才进入渲染和预取队列。逐块回调会让粒子、色带和预取任务反复重建，
+  // 在全球视野下会把一次请求放大成多轮请求，是切换变慢的主要原因。
+  loadFrame(model,field,run,valid,viewport,false).then(data=>{if(active)setGrid({...data,meta:{...data.meta,requestedAt,waitMs}});}).catch(e=>{if(active){setError(e.message);setPlaying(false);}}).finally(()=>{if(active)setLoading(false);});
   return()=>{active=false;};
  },[model,field,run,valid,viewport,activeBatch?.state,satelliteMode]);
  // 只在视野或数据上下文变化时取消请求，播放推进不能打断后续帧预取。
  useEffect(()=>{setPlaying(false);setWaiting(false);return()=>cancelPendingFrames();},[viewport,model,field,run,satelliteMode]);
  useEffect(()=>{
-  if(satelliteMode||!viewport||loading||!run||!grid||grid.meta.model!==model||grid.meta.field!==field)return;
+  if(satelliteMode||!viewport||loading||!run||!grid||!grid.meta.complete||grid.meta.model!==model||grid.meta.field!==field||grid.meta.valid_time!==valid)return;
   let active=true;
   const timer=setTimeout(()=>{void(async()=>{
    const ahead=times.slice(index+1,index+7).map(time=>({field,time}));
@@ -69,9 +75,9 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
    await Promise.all([consume(),consume()]);
   })().catch(()=>{/* 预取失败由前台读取时显示，不能填充替代数据。 */});},100);
   return()=>{active=false;clearTimeout(timer);};
- },[viewport,loading,grid,index,run,model,field,times.length,satelliteMode,playing,availableFields.join(',')]);
+ },[viewport,loading,grid,index,run,valid,model,field,times.length,satelliteMode,playing,availableFields.join(',')]);
  useEffect(()=>{
-  if(!playing||loading||!grid||!viewport||!run)return;
+  if(!playing||loading||!grid||!grid.meta.complete||grid.meta.valid_time!==valid||!viewport||!run)return;
   if(index>=times.length-1){
    if(activeBatch?.state==='ready')setPlaying(false);
    else setWaiting(true);
@@ -85,7 +91,7 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
    }).catch(e=>{if(active){setError(e.message);setPlaying(false);setWaiting(false);}});
   },1500);
   return()=>{active=false;clearTimeout(timer);};
- },[playing,loading,grid,index,viewport,run,model,field,times.length,activeBatch?.state]);
+ },[playing,loading,grid,index,valid,viewport,run,model,field,times.length,activeBatch?.state]);
  const spec=fields[grid?.meta.field||field];
  const ticks=Array.from({length:5},(_,i)=>spec.min+(spec.max-spec.min)*i/4);
  const gradient=`linear-gradient(90deg,${spec.colors.map(c=>`rgb(${c.slice(1).join(',')}) ${(c[0]-spec.min)/(spec.max-spec.min)*100}%`).join(',')})`;

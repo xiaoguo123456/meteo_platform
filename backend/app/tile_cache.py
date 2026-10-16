@@ -3,6 +3,7 @@ import gzip
 import json
 import struct
 import threading
+from collections import OrderedDict
 import numpy as np
 from .response_cache import pack_values
 from .wind_grid import encode_grid
@@ -10,6 +11,36 @@ from .spatial_provider import SpatialDataError, MODEL_GRIDS
 
 SIZE = 128
 LOCKS = [threading.Lock() for _ in range(64)]
+_BLOCK_CACHE: OrderedDict[tuple[str, int, int], bytes] = OrderedDict()
+_BLOCK_CACHE_BYTES = 0
+_BLOCK_CACHE_LIMIT = 256 * 1024 * 1024
+_BLOCK_CACHE_LOCK = threading.Lock()
+
+
+def _read_block(path, offset, length):
+    """缓存已经压缩好的块，避免每次切换要素都重新触发大量随机磁盘读。"""
+    global _BLOCK_CACHE_BYTES
+    key = (str(path), int(offset), int(length))
+    with _BLOCK_CACHE_LOCK:
+        cached = _BLOCK_CACHE.get(key)
+        if cached is not None:
+            _BLOCK_CACHE.move_to_end(key)
+            return cached
+    with path.open('rb') as source:
+        source.seek(offset)
+        value = source.read(length)
+    if len(value) != length:
+        raise SpatialDataError('预报数据块读取不完整')
+    with _BLOCK_CACHE_LOCK:
+        old = _BLOCK_CACHE.pop(key, None)
+        if old is not None:
+            _BLOCK_CACHE_BYTES -= len(old)
+        _BLOCK_CACHE[key] = value
+        _BLOCK_CACHE_BYTES += len(value)
+        while _BLOCK_CACHE_BYTES > _BLOCK_CACHE_LIMIT and _BLOCK_CACHE:
+            _, removed = _BLOCK_CACHE.popitem(last=False)
+            _BLOCK_CACHE_BYTES -= len(removed)
+    return value
 
 
 def prepare_tiles(folder, index, model, field, native, version=4):
@@ -72,14 +103,9 @@ def cached_tiles(model, field, run, valid, ids, version=3):
         data_path, entries = prepare_tiles(folder, index, model, field, native, version)
     else:
         entries = json.loads(index_path.read_text())
-    # 在响应开始前打开文件，批次清理不会中断在途流。
-    stream = data_path.open('rb')
     def generate():
-        try:
-            for tile in ids:
-                offset, length = entries[str(tile)]
-                stream.seek(offset)
-                yield struct.pack('<I', length) + stream.read(length)
-        finally:
-            stream.close()
+        for tile in ids:
+            offset, length = entries[str(tile)]
+            block = _read_block(data_path, offset, length)
+            yield struct.pack('<I', length) + block
     return generate(), sum(4+entries[str(i)][1] for i in ids)
