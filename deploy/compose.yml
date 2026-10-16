@@ -4,7 +4,7 @@ services:
     build: ../backend
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:18001:8000"
     environment:
       METEO_OPEN_METEO_BASE_URL: http://host.docker.internal:8090/v1/forecast
       METEO_OPEN_METEO_SATELLITE_BASE_URL: http://host.docker.internal:8090/v1/archive

@@ -2,8 +2,8 @@
 
 生产目录：`/opt/qingchuan`。Compose 文件：`deploy/compose.yml`，项目名 `qingchuan`。
 
-- 主机 Nginx：监听宿主机 8091，提供 `/var/www/qingchuan` 静态页面并代理 `/api/` 到 `127.0.0.1:8000`。
-- 后端 FastAPI：Docker 内运行，绑定宿主机 `127.0.0.1:8000`，不直接暴露公网；单进程内启动后台预取。
+- 主机 Nginx：监听宿主机 8091，提供 `/var/www/qingchuan` 静态页面并代理 `/api/` 到 `127.0.0.1:18001`。
+- 后端 FastAPI：Docker 内运行，绑定宿主机 `127.0.0.1:18001`，不直接暴露公网；单进程内启动后台预取。
 - 前端不再运行独立 Docker 容器，部署流程在构建机生成 `frontend/dist` 后复制到主机 Nginx 目录。
 - 数据目录：`/opt/qingchuan/data/forecasts`，挂载到后端 `/data/forecasts`。
 - 与既有 `/opt/open-meteo`、8090 端口和 Open-Meteo 数据卷独立。
