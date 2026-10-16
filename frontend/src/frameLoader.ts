@@ -45,7 +45,9 @@ export function loadFrame(model:string,field:string,run:string,time:string,view:
    let response:Response|undefined;
    for(let attempt=0;attempt<2;attempt++){
     try{
-     response=await fetch(`/api/tiles/${model}?${query}`,{signal:controller.signal,priority:background?'low':'high'} as RequestInit);
+     // 运行批次由状态接口动态轮换，数据块本身按 run/time 固定缓存；
+     // no-store 只作用于浏览器对错误响应的复用，成功块仍由服务端和内存缓存复用。
+     response=await fetch(`/api/tiles/${model}?${query}`,{signal:controller.signal,cache:'no-store',priority:background?'low':'high'} as RequestInit);
      if(controller.signal.aborted)throw new DOMException('请求已取消','AbortError');
      if(response.ok)break;
      const body=await response.text();let detail='';try{detail=JSON.parse(body).detail||'';}catch{}

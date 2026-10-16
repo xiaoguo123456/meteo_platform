@@ -168,7 +168,15 @@ async def site_satellite_data(station_id: str = "ningxia-solar") -> dict[str, ob
 @app.get("/api/models/{model_id}/runs")
 def model_runs(model_id: str) -> dict[str, object]:
     try:
-        return read_status(model_id)
+        from fastapi.responses import JSONResponse
+        # 起报清单会在后台轮换，禁止浏览器和 Cloudflare 复用旧批次。
+        return JSONResponse(
+            read_status(model_id),
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+            },
+        )
     except SpatialDataError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
