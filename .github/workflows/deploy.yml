@@ -94,6 +94,8 @@ jobs:
             sleep 2
           done
           curl -fsS --max-time 5 http://127.0.0.1:8091/api/health >/dev/null
+          # 预热全量新能源区域预测缓存，避免生产重启后的首个用户等待模型批量计算。
+          curl -fsS --max-time 180 'http://127.0.0.1:8091/api/power-outlook?hours=24' >/tmp/qingchuan-power-outlook.json
           docker compose -f deploy/compose.yml ps
           EOF
 
