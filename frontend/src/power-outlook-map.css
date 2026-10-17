@@ -83,6 +83,15 @@
 .outlook-table-confidence{color:#4d7f7c;font:500 11px 'DM Mono',monospace}
 .outlook-kpis .warning{background:#fffaf6}
 
+/* 全量站点用密度六边形表达，重点预测站点保留可交互落点。 */
+.outlook-province-map{background:#edf4f2}
+.outlook-esri-basemap{opacity:.32;filter:saturate(.42) contrast(.82) brightness(1.16);mix-blend-mode:multiply;pointer-events:none}
+.outlook-density-layer{pointer-events:none}
+.outlook-density-layer path{stroke:none;shape-rendering:geometricPrecision;transition:fill-opacity .18s ease}
+.outlook-boundary-lines path{stroke:#5d8c88;stroke-width:.35;opacity:.7}
+.outlook-map-legend i.density{width:14px;height:7px;border:0;border-radius:2px;background:linear-gradient(90deg,#d7ebe6 0%,#5a9b96 55%,#2c8584 100%)}
+.outlook-map-credit{position:absolute;z-index:2;right:8px;bottom:6px;color:#6c898a;font:7px system-ui,'PingFang SC',sans-serif;letter-spacing:.02em;opacity:.78;pointer-events:none}
+
 @media(max-width:900px){
  .outlook-main-grid{grid-template-columns:1fr;gap:0}
  .outlook-side-rail{grid-template-columns:1fr 1fr;gap:20px;margin-top:10px}

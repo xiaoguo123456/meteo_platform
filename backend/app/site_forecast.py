@@ -100,6 +100,29 @@ def list_stations(keyword: str = "", type_: str | None = None, province: str = "
     return {"stations": page, "total": len(filtered), "has_more": offset + len(page) < len(filtered), "counts": counts, "regions": sorted({row.get("province") for row in all_rows if row.get("province")})}
 
 
+@lru_cache(maxsize=1)
+def list_station_points() -> dict[str, Any]:
+    """返回全量站点的轻量空间索引，供态势地图做密度聚合。"""
+    rows = _all_stations()
+    points = []
+    for row in rows:
+        try:
+            latitude, longitude = float(row["latitude"]), float(row["longitude"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        points.append({
+            "id": row["id"],
+            "short_name": row.get("short_name") or row.get("name") or "未命名站点",
+            "province": row.get("province") or "",
+            "city": row.get("city") or "",
+            "type": row.get("type") if row.get("type") in {"wind", "solar"} else "wind",
+            "latitude": latitude,
+            "longitude": longitude,
+            "capacity_kw": float(row.get("capacity_kw") or 0),
+        })
+    return {"station_count": len(points), "stations": points}
+
+
 def _station(station_id: str) -> dict[str, Any]:
     try:
         return next(item for item in _all_stations() if item["id"] == station_id)
@@ -118,6 +141,7 @@ def create_station(payload: SiteCreate) -> dict[str, Any]:
     temporary.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary.replace(path)
     _custom_rows.cache_clear()
+    list_station_points.cache_clear()
     _POWER_OUTLOOK_CACHE.clear()
     return row
 

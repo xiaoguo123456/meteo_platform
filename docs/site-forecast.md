@@ -10,6 +10,12 @@
 - `GET /api/site-forecast?station_id=...&model=gfs`：站点天气与功率预测。
 - `GET /api/site-satellite?station_id=...`：光伏站点的葵花卫星 10 分钟辐射附加数据，独立加载。
 
+新能源态势模块单独使用以下接口：
+
+- `GET /api/power-outlook?hours=24&limit=12`：重点站点的四模型功率集合、区域排名和爬坡预警；只对精选/自定义站点发起逐站预报。
+- `GET /api/power-outlook/stations`：全量站点的轻量坐标索引，当前约 1.78 万个站点，只在浏览器中做密度六边形聚合，不逐站请求模型。
+- `GET /api/basemap/china-street`：服务端缓存的 Esri World Street Map 中国静态底图，使用 EPSG:3857 与态势地图投影一致。
+
 后端通过 `METEO_OPEN_METEO_BASE_URL` 访问同一台服务器上的自部署 Open-Meteo。生产环境由 `deploy/compose.yml` 将 `host.docker.internal` 映射到宿主机，默认地址为 `http://host.docker.internal:8090/v1/forecast`，不会影响已有 Open-Meteo 容器。
 
 功率、装机容量和七天峰值在界面统一以 MW / MWh 展示；曲线支持点击和悬停，选中后同步显示该时刻的功率和风速或辐射。光伏站点额外请求本机 `/v1/archive?models=jma_jaxa_himawari&temporal_resolution=native`，展示葵花卫星反演辐射与模型辐射的同口径对比，并在场站云图上标出站点位置。真彩色为白天默认图层，夜间自动使用红外图层以避免可见光空白。
@@ -19,3 +25,9 @@
 ## 响应式处理
 
 桌面端使用左侧站点目录和右侧预测内容，窄屏改为上下布局；资讯政策预览增加自适应容器和横向滚动保护，避免官方固定宽度页面撑破详情弹窗。
+
+## 新能源态势地图
+
+地图按“底图、站点密度、省界、重点预测站点”分层渲染。全量站点以六边形密度层表达，颜色区分风电和光伏占比，密度越高透明度越高；重点预测站点保留可点击落点，并与右侧区域排名、预警、下方站点表联动。全量站点只传输坐标、类型和装机容量，不会因为打开态势页而触发上万次天气模型请求。
+
+Esri 底图由后端缓存后提供，页面保留 `Esri · World Street Map` 署名；缓存失效时会重新拉取，已有旧缓存可继续使用。

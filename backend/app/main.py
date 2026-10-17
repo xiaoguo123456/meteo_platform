@@ -12,12 +12,12 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 from .catalog import MODEL_CATALOG, VARIABLE_CATALOG
 from .config import get_settings
-from .basemap_service import ensure_world_imagery, warm_world_imagery
+from .basemap_service import ensure_china_street_map, ensure_world_imagery, warm_world_imagery
 from .schemas import BoundaryCollection, FieldManifest, ModelSummary
 from .satellite_service import latest_himawari, local_image_bounds, satellite_loop, station_image
 from .spatial_provider import SpatialDataError
 from .weather_service import WeatherDataError, get_weather_grid, get_weather_particles
-from .site_forecast import SiteCreate, _station, create_station, forecast as site_forecast, list_stations, power_outlook, satellite_radiation
+from .site_forecast import SiteCreate, _station, create_station, forecast as site_forecast, list_station_points, list_stations, power_outlook, satellite_radiation
 from .satellite_catalog import categories as satellite_categories, constellation_members, get_satellite, list_satellites, satellite_orbit_loop, track as satellite_track
 
 
@@ -77,6 +77,27 @@ async def world_imagery_basemap():
         )
     except (httpx.HTTPError, OSError, RuntimeError) as error:
         raise HTTPException(status_code=503, detail=f"Esri 底图加载失败：{error}") from error
+
+
+@app.get("/api/basemap/china-street")
+async def china_street_basemap():
+    """服务端缓存与态势地图投影一致的 Esri 中国浅色底图。"""
+    from fastapi.responses import FileResponse
+
+    try:
+        path, state = await ensure_china_street_map()
+        return FileResponse(
+            path,
+            media_type="image/png",
+            headers={
+                "Cache-Control": "public, max-age=604800, stale-while-revalidate=86400",
+                "Content-Encoding": "identity",
+                "X-Basemap-Cache": state,
+                "X-Basemap-Attribution": "Esri, HERE, Garmin, (c) OpenStreetMap contributors",
+            },
+        )
+    except (httpx.HTTPError, OSError, RuntimeError) as error:
+        raise HTTPException(status_code=503, detail=f"Esri 中国底图加载失败：{error}") from error
 
 
 @app.get("/api/models", response_model=list[ModelSummary])
@@ -146,6 +167,19 @@ def site_stations(
         headers={
             "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=60",
             "CDN-Cache-Control": "max-age=300, stale-while-revalidate=60",
+        },
+    )
+
+
+@app.get("/api/power-outlook/stations")
+def power_outlook_stations() -> dict[str, object]:
+    """返回全量新能源站点轻量坐标，前端只做密度聚合，不触发逐站预测。"""
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        list_station_points(),
+        headers={
+            "Cache-Control": "public, max-age=300, s-maxage=1800, stale-while-revalidate=600",
+            "CDN-Cache-Control": "max-age=1800, stale-while-revalidate=600",
         },
     )
 
