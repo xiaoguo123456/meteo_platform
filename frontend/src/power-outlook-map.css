@@ -142,18 +142,18 @@
 .outlook-map-legend i.solar{width:8px;height:8px;background:#c98d4f}
 .outlook-type.region{background:#e7f1f2;color:#2c6975}
 .outlook-station-dot.region{background:#2d797e}
-.outlook-map-site-popup{position:absolute;z-index:5;width:218px;padding:12px 13px;border:1px solid rgba(73,124,137,.32);border-radius:9px;background:rgba(250,253,253,.94);box-shadow:0 10px 26px rgba(32,73,82,.2);backdrop-filter:blur(12px);pointer-events:auto}
+.outlook-map-site-popup{position:absolute;z-index:5;width:min(286px,calc(100% - 16px));padding:12px 13px;border:1px solid rgba(73,124,137,.32);border-radius:9px;background:rgba(250,253,253,.94);box-shadow:0 10px 26px rgba(32,73,82,.2);backdrop-filter:blur(12px);pointer-events:auto}
 .outlook-map-site-popup>button{position:absolute;top:6px;right:8px;width:20px;height:20px;padding:0;border:0;background:transparent;color:#6d858b;font-size:18px;line-height:18px;cursor:pointer}
-.outlook-map-site-popup>strong,.outlook-map-site-popup>small{display:block;max-width:185px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.outlook-map-site-popup>strong,.outlook-map-site-popup>small{display:block;max-width:calc(100% - 22px);overflow:hidden;text-overflow:ellipsis}.outlook-map-site-popup>strong{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;overflow-wrap:anywhere}
 .outlook-map-site-popup>strong{color:#285e6d;font-size:12px;font-weight:650}
 .outlook-map-site-popup>small{margin-top:4px;color:#799197;font-size:10px}
-.outlook-map-site-popup>div{display:grid;grid-template-columns:35px 1fr 35px 1fr;gap:5px 8px;margin-top:10px;padding-top:9px;border-top:1px solid #dce9e8;color:#8aa0a3;font-size:9px;align-items:baseline}
-.outlook-map-site-popup>div b{color:#347177;font:500 10px 'DM Mono',monospace;white-space:nowrap}
+.outlook-map-site-popup>.outlook-site-meta{display:grid;grid-template-columns:35px 1fr 35px 1fr;gap:5px 8px;margin-top:10px;padding-top:9px;border-top:1px solid #dce9e8;color:#8aa0a3;font-size:9px;align-items:baseline}
+.outlook-map-site-popup>.outlook-site-meta b{color:#347177;font:500 10px 'DM Mono',monospace;white-space:nowrap}
 .outlook-map-site-popup>em{display:block;margin-top:10px;color:#82979a;font-size:9px;font-style:normal}
-.outlook-map-site-popup .outlook-site-warning{grid-template-columns:35px 1fr;margin-top:7px;padding-top:7px}
+.outlook-map-site-popup .outlook-site-warning{display:grid;grid-template-columns:35px 1fr;margin-top:7px;padding-top:7px}
 .outlook-map-site-popup .outlook-site-warning b{color:#b5684c}
 .outlook-site-detail-chart{margin-top:9px;padding-top:8px;border-top:1px solid #dce9e8}
-.outlook-site-detail-chart svg{display:block;width:100%;height:54px;overflow:visible}
+.outlook-site-detail-chart svg{display:block;width:100%;height:64px;overflow:visible}
 .outlook-site-detail-chart>div{display:flex;justify-content:space-between;margin-top:3px;color:#91a4a5;font:8px 'DM Mono',monospace}
 .outlook-site-detail-empty{margin-top:9px;color:#82979a;font-size:9px}
 @media(max-width:900px){.outlook-map-shell{height:360px}}
