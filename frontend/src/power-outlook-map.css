@@ -129,6 +129,9 @@
 .outlook-map-overlay{position:absolute;z-index:4;top:12px;left:12px;display:flex;align-items:baseline;gap:9px;padding:7px 10px;border:1px solid rgba(120,164,158,.32);border-radius:7px;background:rgba(249,253,252,.86);box-shadow:0 5px 18px rgba(42,83,81,.08);backdrop-filter:blur(8px);pointer-events:none}
 .outlook-map-overlay span{color:#668688;font-size:10px}
 .outlook-map-overlay strong{color:#2e7777;font:500 10px 'DM Mono',monospace}
+.outlook-map-filters{position:absolute;z-index:4;top:12px;right:58px;display:flex;padding:3px;border:1px solid rgba(120,164,158,.32);border-radius:7px;background:rgba(249,253,252,.86);box-shadow:0 5px 18px rgba(42,83,81,.08);backdrop-filter:blur(8px)}
+.outlook-map-filters button{padding:4px 8px;border:0;border-radius:5px;background:transparent;color:#648386;font-size:10px;cursor:pointer}
+.outlook-map-filters button.active{background:#2e7777;color:#fff}
 .outlook-map-status{position:absolute;z-index:3;inset:0;display:grid;place-items:center;color:#547b7c;font-size:11px;pointer-events:none}
 .outlook-map-status.error{color:#a65a48}
 .outlook-map-credit{position:absolute;z-index:3;right:11px;bottom:9px;color:#507878;font:8px system-ui,'PingFang SC',sans-serif;letter-spacing:.02em;pointer-events:none;text-shadow:0 1px 8px rgba(255,255,255,.9)}
@@ -146,5 +149,12 @@
 .outlook-map-site-popup>small{margin-top:4px;color:#799197;font-size:10px}
 .outlook-map-site-popup>div{display:grid;grid-template-columns:35px 1fr 35px 1fr;gap:5px 8px;margin-top:10px;padding-top:9px;border-top:1px solid #dce9e8;color:#8aa0a3;font-size:9px;align-items:baseline}
 .outlook-map-site-popup>div b{color:#347177;font:500 10px 'DM Mono',monospace;white-space:nowrap}
+.outlook-map-site-popup>em{display:block;margin-top:10px;color:#82979a;font-size:9px;font-style:normal}
+.outlook-map-site-popup .outlook-site-warning{grid-template-columns:35px 1fr;margin-top:7px;padding-top:7px}
+.outlook-map-site-popup .outlook-site-warning b{color:#b5684c}
+.outlook-site-detail-chart{margin-top:9px;padding-top:8px;border-top:1px solid #dce9e8}
+.outlook-site-detail-chart svg{display:block;width:100%;height:54px;overflow:visible}
+.outlook-site-detail-chart>div{display:flex;justify-content:space-between;margin-top:3px;color:#91a4a5;font:8px 'DM Mono',monospace}
+.outlook-site-detail-empty{margin-top:9px;color:#82979a;font-size:9px}
 @media(max-width:900px){.outlook-map-shell{height:360px}}
-@media(max-width:620px){.outlook-map-shell{height:290px}.outlook-map-overlay{top:9px;left:9px;gap:6px;padding:6px 8px}.outlook-map-overlay span,.outlook-map-overlay strong{font-size:9px}.outlook-map-canvas .maplibregl-ctrl-top-right{top:9px;right:9px}.outlook-map-canvas .maplibregl-ctrl-group button{width:28px;height:28px}}
+@media(max-width:620px){.outlook-map-shell{height:290px}.outlook-map-overlay{top:9px;left:9px;gap:6px;padding:6px 8px}.outlook-map-overlay span,.outlook-map-overlay strong{font-size:9px}.outlook-map-filters{top:9px;right:47px}.outlook-map-filters button{padding:3px 6px;font-size:9px}.outlook-map-canvas .maplibregl-ctrl-top-right{top:9px;right:9px}.outlook-map-canvas .maplibregl-ctrl-group button{width:28px;height:28px}}
