@@ -132,7 +132,7 @@
 .outlook-map-status{position:absolute;z-index:3;inset:0;display:grid;place-items:center;color:#547b7c;font-size:11px;pointer-events:none}
 .outlook-map-status.error{color:#a65a48}
 .outlook-map-credit{position:absolute;z-index:3;right:11px;bottom:9px;color:#507878;font:8px system-ui,'PingFang SC',sans-serif;letter-spacing:.02em;pointer-events:none;text-shadow:0 1px 8px rgba(255,255,255,.9)}
-.outlook-map-legend i.density{width:16px;height:7px;border:0;border-radius:3px;background:linear-gradient(90deg,#dff1eb 0%,#4f9d98 58%,#0c545e 100%)}
+.outlook-map-legend i.density{width:16px;height:7px;border:0;border-radius:3px;background:linear-gradient(90deg,#d7e8f6 0%,#4e86bd 55%,#c8495b 100%)}
 .outlook-map-legend i.clusters{width:11px;height:11px;border:2px solid #4c9690;border-radius:50%;background:transparent}
 .outlook-map-legend i.region{width:9px;height:9px;border:2px solid #2d797e;border-radius:50%;background:#2d797e55}
 .outlook-map-legend i.wind{width:8px;height:8px;background:#227f80}
