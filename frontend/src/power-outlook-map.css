@@ -153,8 +153,14 @@
 .outlook-map-site-popup .outlook-site-warning{display:grid;grid-template-columns:35px 1fr;margin-top:7px;padding-top:7px}
 .outlook-map-site-popup .outlook-site-warning b{color:#b5684c}
 .outlook-site-detail-chart{margin-top:9px;padding-top:8px;border-top:1px solid #dce9e8}
-.outlook-site-detail-chart svg{display:block;width:100%;height:64px;overflow:visible}
-.outlook-site-detail-chart>div{display:flex;justify-content:space-between;margin-top:3px;color:#91a4a5;font:8px 'DM Mono',monospace}
+.outlook-site-detail-chart-body{display:grid;grid-template-columns:48px minmax(0,1fr);gap:7px;align-items:stretch}
+.outlook-site-detail-axis{display:flex;flex-direction:column;justify-content:space-between;padding:1px 0 0;color:#84999c;font:8px 'DM Mono',monospace;text-align:right;white-space:nowrap}
+.outlook-site-detail-plot{position:relative;min-width:0}
+.outlook-site-detail-plot svg{display:block;width:100%;height:82px;overflow:visible;cursor:crosshair}
+.outlook-site-detail-tooltip{position:absolute;z-index:2;top:3px;display:grid;gap:2px;min-width:74px;padding:5px 6px;border:1px solid #b7d4d7;border-radius:5px;background:rgba(250,253,253,.96);box-shadow:0 4px 10px rgba(36,76,82,.14);pointer-events:none;transform:translateX(-50%);white-space:nowrap}
+.outlook-site-detail-tooltip strong{color:#2c6b78;font:500 9px 'DM Mono',monospace}
+.outlook-site-detail-tooltip span{color:#347177;font:500 9px 'DM Mono',monospace}
+.outlook-site-detail-chart-labels{display:flex;justify-content:space-between;margin:3px 0 0 55px;color:#91a4a5;font:8px 'DM Mono',monospace}
 .outlook-site-detail-empty{margin-top:9px;color:#82979a;font-size:9px}
 @media(max-width:900px){.outlook-map-shell{height:360px}}
 @media(max-width:620px){.outlook-map-shell{height:290px}.outlook-map-overlay{top:9px;left:9px;gap:6px;padding:6px 8px}.outlook-map-overlay span,.outlook-map-overlay strong{font-size:9px}.outlook-map-filters{top:9px;right:47px}.outlook-map-filters button{padding:3px 6px;font-size:9px}.outlook-map-canvas .maplibregl-ctrl-top-right{top:9px;right:9px}.outlook-map-canvas .maplibregl-ctrl-group button{width:28px;height:28px}}
