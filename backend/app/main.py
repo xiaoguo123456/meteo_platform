@@ -225,7 +225,7 @@ async def power_outlook_data(
     hours: int = Query(default=24, ge=6, le=48),
     limit: int = Query(default=12, ge=1, le=24),
 ) -> dict[str, object]:
-    """新能源态势：聚合精选站点的多模型功率区间和爬坡预警。"""
+    """新能源态势：聚合全量站点的多模型区域功率区间和爬坡预警。"""
     try:
         return await power_outlook(hours=hours, limit=limit)
     except (ValueError, RuntimeError, httpx.HTTPError) as error:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import gzip
 import json
+import math
 import time
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
@@ -34,7 +35,28 @@ MODEL_PARAMS = {
 }
 CATALOG_PATH = Path(__file__).with_name("site_catalog.json.gz")
 _SATELLITE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
-_POWER_OUTLOOK_CACHE: dict[tuple[int, int], tuple[float, dict[str, Any]]] = {}
+_POWER_OUTLOOK_CACHE: dict[tuple[int, str], tuple[float, dict[str, Any]]] = {}
+
+REGION_ORDER = ("西北", "华北", "东北", "华东", "华中", "华南", "西南", "其他")
+
+
+def _region_for_province(province: str | None) -> str:
+    value = province or ""
+    if any(item in value for item in ("新疆", "西藏", "青海", "甘肃", "宁夏", "陕西", "内蒙古")):
+        return "西北"
+    if any(item in value for item in ("北京", "天津", "河北", "山西", "山东")):
+        return "华北"
+    if any(item in value for item in ("辽宁", "吉林", "黑龙江")):
+        return "东北"
+    if any(item in value for item in ("上海", "江苏", "浙江", "安徽", "福建", "江西")):
+        return "华东"
+    if any(item in value for item in ("河南", "湖北", "湖南")):
+        return "华中"
+    if any(item in value for item in ("广东", "广西", "海南", "香港", "澳门", "台湾")):
+        return "华南"
+    if any(item in value for item in ("四川", "重庆", "贵州", "云南")):
+        return "西南"
+    return "其他"
 
 
 class SiteCreate(BaseModel):
@@ -259,139 +281,141 @@ def _ensemble(values: list[float], capacity_kw: float) -> tuple[float, float, fl
     return round(low, 1), round(center, 1), round(high, 1), confidence
 
 
-def _outlook_stations(limit: int) -> list[dict[str, Any]]:
-    """态势页默认展示精选和自定义站点，避免首次打开就请求整个编目。"""
-    rows = _all_stations()
-    selected = [row for row in rows if row.get("is_featured") or row.get("is_custom")]
-    selected.sort(key=lambda row: (-float(row.get("capacity_kw") or 0), row.get("name", "")))
-    return selected[:limit]
+def _province_buckets(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """把全量站点按省份汇总，使用容量加权中心请求天气。"""
+    buckets: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        province = row.get("province") or "未标注"
+        bucket = buckets.setdefault(province, {"province": province, "station_count": 0, "capacity_kw": 0.0, "wind_capacity_kw": 0.0, "solar_capacity_kw": 0.0, "latitude_weight": 0.0, "longitude_weight": 0.0})
+        capacity = float(row.get("capacity_kw") or 0.0)
+        bucket["station_count"] += 1
+        bucket["capacity_kw"] += capacity
+        bucket[f"{row.get('type', 'wind')}_capacity_kw"] += capacity
+        bucket["latitude_weight"] += float(row.get("latitude") or 0.0) * capacity
+        bucket["longitude_weight"] += float(row.get("longitude") or 0.0) * capacity
+    for bucket in buckets.values():
+        divisor = max(bucket["capacity_kw"], 1.0)
+        bucket["latitude"] = bucket.pop("latitude_weight") / divisor
+        bucket["longitude"] = bucket.pop("longitude_weight") / divisor
+        bucket["region"] = _region_for_province(bucket["province"])
+    return buckets
+
+
+async def _batch_model_weather(buckets: list[dict[str, Any]], model: str, hours: int) -> dict[str, dict[str, list[Any]]]:
+    """一次请求所有省份的天气，避免对 1.78 万个站点逐站请求。"""
+    if not buckets:
+        return {}
+    settings = get_settings()
+    params = {
+        "latitude": ",".join(f"{item['latitude']:.4f}" for item in buckets),
+        "longitude": ",".join(f"{item['longitude']:.4f}" for item in buckets),
+        "models": MODEL_PARAMS[model]["models"],
+        "forecast_days": max(2, math.ceil((hours + 1) / 24)),
+        "wind_speed_unit": "ms",
+        "timezone": "Asia/Shanghai",
+        "hourly": "wind_speed_10m,cloud_cover,shortwave_radiation",
+    }
+    async with httpx.AsyncClient(timeout=60, limits=httpx.Limits(max_connections=4, max_keepalive_connections=4)) as client:
+        response = await client.get(settings.open_meteo_base_url, params=params)
+    if response.status_code >= 400:
+        raise RuntimeError(f"{model.upper()} 全量区域天气返回 {response.status_code}")
+    raw = response.json()
+    payloads = raw if isinstance(raw, list) else [raw]
+    if len(payloads) != len(buckets):
+        raise RuntimeError(f"{model.upper()} 全量区域天气返回数量异常")
+    result: dict[str, dict[str, list[Any]]] = {}
+    for bucket, payload in zip(buckets, payloads):
+        hourly = payload.get("hourly") or {}
+        result[bucket["province"]] = {key: list(hourly.get(key) or [])[:hours] for key in ("time", "wind_speed_10m", "cloud_cover", "shortwave_radiation")}
+    return result
 
 
 async def power_outlook(hours: int = 24, limit: int = 12) -> dict[str, Any]:
-    """汇总精选新能源站点，供新能源态势模块绘制区域功率和爬坡预警。"""
+    """用全量站点容量参与区域级四模型预测，天气按省级容量加权中心批量请求。"""
+    del limit  # 保留旧参数，兼容已有前端和外部调用方。
     hours = max(6, min(hours, 48))
-    limit = max(1, min(limit, 24))
-    cache_key = (hours, limit)
+    cache_key = (hours, "full-catalog")
     cached = _POWER_OUTLOOK_CACHE.get(cache_key)
     if cached and time.monotonic() - cached[0] < 300:
         return cached[1]
 
-    stations = _outlook_stations(limit)
+    rows = _all_stations()
+    buckets = _province_buckets(rows)
+    bucket_list = list(buckets.values())
     model_ids = tuple(MODEL_PARAMS)
-    semaphore = asyncio.Semaphore(6)
-
-    async def read_one(station: dict[str, Any], model: str):
-        async with semaphore:
-            try:
-                return station, model, await forecast(station["id"], model, include_satellite=False), None
-            except (ValueError, RuntimeError, httpx.HTTPError) as error:
-                return station, model, None, str(error)
-
-    reads = await asyncio.gather(*(read_one(station, model) for station in stations for model in model_ids))
-    grouped: dict[str, dict[str, dict[str, Any]]] = {station["id"]: {} for station in stations}
+    reads = await asyncio.gather(*(_batch_model_weather(bucket_list, model, hours) for model in model_ids), return_exceptions=True)
+    weather_by_model: dict[str, dict[str, dict[str, list[Any]]]] = {}
     errors: list[str] = []
-    for station, model, result, error in reads:
-        if result is not None:
-            grouped[station["id"]][model] = result
-        elif error:
-            errors.append(f"{station['short_name']} {model.upper()}：{error}")
+    for model, result in zip(model_ids, reads):
+        if isinstance(result, Exception):
+            errors.append(f"{MODEL_PARAMS[model]['name']}：{result}")
+        else:
+            weather_by_model[model] = result
 
-    station_payloads: list[dict[str, Any]] = []
+    region_buckets: dict[str, list[dict[str, Any]]] = {region: [] for region in REGION_ORDER}
+    for bucket in bucket_list:
+        region_buckets[bucket["region"]].append(bucket)
+    region_payloads: list[dict[str, Any]] = []
     all_times: list[str] = []
-    for station in stations:
-        models = grouped[station["id"]]
-        if not models:
-            continue
-        base = next(iter(models.values()))
-        series = []
-        for index in range(hours):
-            timestamp = next((item.get("time") for item in base.get("hourly", [])[index:index + 1]), None)
-            values = [
-                float(item["hourly"][index]["power_kw"])
-                for item in models.values()
-                if index < len(item.get("hourly", [])) and item["hourly"][index].get("power_kw") is not None
-            ]
-            if not values or timestamp is None:
+    region_model_series: dict[str, dict[str, dict[str, float]]] = {region: {model: {} for model in weather_by_model} for region in REGION_ORDER}
+    for model, province_weather in weather_by_model.items():
+        for bucket in bucket_list:
+            weather = province_weather.get(bucket["province"])
+            if not weather:
                 continue
-            low, center, high, confidence = _ensemble(values, float(station["capacity_kw"]))
-            ramp = 0.0 if not series else round(center - series[-1]["p50_kw"], 1)
-            series.append({"time": timestamp, "p10_kw": low, "p50_kw": center, "p90_kw": high, "ramp_kw": ramp, "confidence": confidence})
-            if timestamp not in all_times:
-                all_times.append(timestamp)
-        if not series:
-            continue
-        next_window = series[: min(7, len(series))]
-        ramp_item = max(next_window[1:] or next_window, key=lambda item: abs(item["ramp_kw"]))
-        current = series[0]
-        peak = max(item["p50_kw"] for item in series)
-        station_payloads.append({
-            "station": station,
-            "models": list(models),
-            "current_kw": current["p50_kw"],
-            "peak_kw": round(peak, 1),
-            "ramp_kw": ramp_item["ramp_kw"],
-            "ramp_time": ramp_item["time"],
-            "confidence": current["confidence"],
-            "series": series,
-        })
+            region = bucket["region"]
+            times = weather.get("time") or []
+            for index, timestamp in enumerate(times[:hours]):
+                wind = weather.get("wind_speed_10m", [])[index] if index < len(weather.get("wind_speed_10m", [])) else None
+                cloud = weather.get("cloud_cover", [])[index] if index < len(weather.get("cloud_cover", [])) else None
+                radiation = weather.get("shortwave_radiation", [])[index] if index < len(weather.get("shortwave_radiation", [])) else None
+                power = (_power({"type": "wind", "capacity_kw": bucket["wind_capacity_kw"]}, wind, None, None) or 0.0) + (_power({"type": "solar", "capacity_kw": bucket["solar_capacity_kw"]}, None, radiation, cloud) or 0.0)
+                region_model_series[region][model][timestamp] = region_model_series[region][model].get(timestamp, 0.0) + power
+                if timestamp not in all_times:
+                    all_times.append(timestamp)
 
     all_times = sorted(all_times)[:hours]
-    totals = []
+    for region in REGION_ORDER:
+        region_buckets_list = region_buckets[region]
+        if not region_buckets_list:
+            continue
+        capacity = sum(item["capacity_kw"] for item in region_buckets_list)
+        station_count = sum(item["station_count"] for item in region_buckets_list)
+        series: list[dict[str, Any]] = []
+        for timestamp in all_times:
+            values = [region_model_series[region][model][timestamp] for model in weather_by_model if timestamp in region_model_series[region][model]]
+            if not values:
+                continue
+            low, center, high, confidence = _ensemble(values, capacity)
+            ramp = 0.0 if not series else round(center - series[-1]["p50_kw"], 1)
+            series.append({"time": timestamp, "p10_kw": low, "p50_kw": center, "p90_kw": high, "ramp_kw": ramp, "confidence": confidence})
+        if series:
+            region_payloads.append({"region": region, "station_count": station_count, "capacity_kw": round(capacity, 1), "series": series})
+
+    totals: list[dict[str, Any]] = []
     for timestamp in all_times:
-        points = [next((item for item in station["series"] if item["time"] == timestamp), None) for station in station_payloads]
+        points = [next((item for item in region["series"] if item["time"] == timestamp), None) for region in region_payloads]
         points = [item for item in points if item]
         if not points:
             continue
-        totals.append({
-            "time": timestamp,
-            "p10_kw": round(sum(item["p10_kw"] for item in points), 1),
-            "p50_kw": round(sum(item["p50_kw"] for item in points), 1),
-            "p90_kw": round(sum(item["p90_kw"] for item in points), 1),
-            "confidence": round(sum(item["confidence"] for item in points) / len(points)),
-        })
+        totals.append({"time": timestamp, "p10_kw": round(sum(item["p10_kw"] for item in points), 1), "p50_kw": round(sum(item["p50_kw"] for item in points), 1), "p90_kw": round(sum(item["p90_kw"] for item in points), 1), "confidence": round(sum(item["confidence"] for item in points) / len(points))})
     for index, item in enumerate(totals):
         item["ramp_kw"] = 0.0 if index == 0 else round(item["p50_kw"] - totals[index - 1]["p50_kw"], 1)
 
     alerts = []
-    for payload in station_payloads:
-        capacity = float(payload["station"]["capacity_kw"])
-        if abs(payload["ramp_kw"]) < max(1000.0, capacity * 0.08):
+    for region in region_payloads:
+        window = region["series"][: min(7, len(region["series"]))]
+        ramp_item = max(window[1:] or window, key=lambda item: abs(item["ramp_kw"]))
+        threshold = max(1000.0, region["capacity_kw"] * 0.08)
+        if abs(ramp_item["ramp_kw"]) < threshold:
             continue
-        direction = "上升" if payload["ramp_kw"] > 0 else "下降"
-        severity = "high" if abs(payload["ramp_kw"]) >= capacity * 0.2 else "medium"
-        alerts.append({
-            "station_id": payload["station"]["id"],
-            "station_name": payload["station"]["short_name"],
-            "type": payload["station"]["type"],
-            "time": payload["ramp_time"],
-            "direction": direction,
-            "ramp_kw": payload["ramp_kw"],
-            "ramp_mw": round(payload["ramp_kw"] / 1000, 1),
-            "confidence": payload["confidence"],
-            "severity": severity,
-            "message": f"{payload['station']['short_name']}未来窗口预计{direction} {abs(payload['ramp_kw']) / 1000:.1f} MW",
-        })
+        direction = "上升" if ramp_item["ramp_kw"] > 0 else "下降"
+        alerts.append({"station_id": f"region:{region['region']}", "station_name": f"{region['region']}区域", "region": region["region"], "type": "wind", "time": ramp_item["time"], "direction": direction, "ramp_kw": ramp_item["ramp_kw"], "ramp_mw": round(ramp_item["ramp_kw"] / 1000, 1), "confidence": ramp_item["confidence"], "severity": "high" if abs(ramp_item["ramp_kw"]) >= region["capacity_kw"] * 0.2 else "medium", "message": f"{region['region']}区域未来窗口预计{direction} {abs(ramp_item['ramp_kw']) / 1000:.1f} MW"})
     alerts.sort(key=lambda item: abs(item["ramp_kw"]), reverse=True)
 
-    capacity_kw = sum(float(item["station"]["capacity_kw"]) for item in station_payloads)
+    capacity_kw = sum(float(item.get("capacity_kw") or 0.0) for item in rows)
     total_current = totals[0]["p50_kw"] if totals else 0.0
     next_ramp = totals[1]["ramp_kw"] if len(totals) > 1 else 0.0
-    result = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "hours": hours,
-        "models": [{"id": key, "name": value["name"]} for key, value in MODEL_PARAMS.items()],
-        "station_count": len(station_payloads),
-        "errors": errors[:12],
-        "totals": {
-            "capacity_kw": round(capacity_kw, 1),
-            "current_kw": round(total_current, 1),
-            "next_ramp_kw": round(next_ramp, 1),
-            "peak_kw": round(max((item["p50_kw"] for item in totals), default=0.0), 1),
-            "confidence": totals[0]["confidence"] if totals else 0,
-            "series": totals,
-        },
-        "alerts": alerts[:8],
-        "stations": [{key: value for key, value in payload.items() if key != "models"} for payload in station_payloads],
-    }
+    result = {"generated_at": datetime.now(timezone.utc).isoformat(), "hours": hours, "models": [{"id": key, "name": value["name"]} for key, value in MODEL_PARAMS.items()], "station_count": len(rows), "errors": errors[:12], "totals": {"capacity_kw": round(capacity_kw, 1), "current_kw": round(total_current, 1), "next_ramp_kw": round(next_ramp, 1), "peak_kw": round(max((item["p50_kw"] for item in totals), default=0.0), 1), "confidence": totals[0]["confidence"] if totals else 0, "series": totals}, "alerts": alerts[:8], "regions": region_payloads, "stations": []}
     _POWER_OUTLOOK_CACHE[cache_key] = (time.monotonic(), result)
     return result
