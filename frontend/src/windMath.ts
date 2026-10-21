@@ -1,4 +1,4 @@
-export type GridMeta = { complete?:boolean; requestedAt?:number; waitMs?:number; width:number; height:number; lon0:number; lat0:number; dx:number; dy:number; valid_time:string; level:string; model:string; field?:string; units?:string; interval_start?:string|null };
+export type GridMeta = { complete?:boolean; requestedAt?:number; waitMs?:number; width:number; height:number; lon0:number; lat0:number; dx:number; dy:number; run_time?:string; valid_time:string; level:string; model:string; field?:string; units?:string; interval_start?:string|null };
 export type Grid = { meta:GridMeta; u:Float32Array; v:Float32Array; tiles?:Record<number,{width:number;u:Float32Array;v:Float32Array}> };
 export function sample(grid:Grid, lon:number, lat:number): [number,number,number] | null {
   const m=grid.meta;

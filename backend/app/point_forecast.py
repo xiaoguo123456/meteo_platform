@@ -51,12 +51,10 @@ def _series(root, model, key, field, times, indices, row, col):
 
 
 def point_forecast(model, field, longitude, latitude, run=None):
-    from .forecast_cache import ROOT, read_status
+    from .forecast_cache import ROOT, read_run_status
     if model not in MODEL_GRIDS or not math.isfinite(longitude) or not math.isfinite(latitude) or not -180<=longitude<=180 or not -90<=latitude<=90:
         raise ValueError('经纬度或模型无效')
-    status = read_status(model)
-    if run and run != status.get('run_time'):
-        raise SpatialDataError('起报批次已更新，请重新选择位置')
+    status = read_run_status(model, run)
     times = tuple(status.get('field_times',{}).get(field, []))
     if not times:
         raise SpatialDataError('当前模型没有该要素的已缓存预报')

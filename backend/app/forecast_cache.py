@@ -38,6 +38,49 @@ def read_status(model):
     return json.loads(path.read_text())
 
 
+def read_pending_status(model):
+    """读取正在预取但尚未对外切换的起报批次。"""
+    if model not in MODEL_SPATIAL_NAMES:
+        raise SpatialDataError('不支持的模型')
+    path = ROOT / model / 'status.pending.json'
+    try:
+        return json.loads(path.read_text())
+    except FileNotFoundError:
+        return None
+
+
+def read_public_status(model):
+    """返回当前可用批次，并附带后台待切换批次的进度。"""
+    status = read_status(model)
+    pending = read_pending_status(model)
+    if not pending or pending.get('state') == 'ready':
+        return status
+    public = dict(status)
+    public.update({
+        'pending_run_time': pending.get('run_time'),
+        'pending_cached': len(pending.get('times', [])),
+        'pending_total': pending.get('total', 0),
+        'pending_state': pending.get('state'),
+        'pending_error': pending.get('error'),
+    })
+    return public
+
+
+def read_run_status(model, run_time=None):
+    """固定起报请求也可读取仍在保留期内的上一批，避免切换时拒绝在途请求。"""
+    status = read_status(model)
+    if not run_time or run_time == status.get('run_time'):
+        return status
+    try:
+        key = datetime.fromisoformat(run_time.replace('Z', '+00:00')).strftime('%Y%m%dT%H%M')
+        retained = json.loads((ROOT/model/key/'published.json').read_text())
+        if retained.get('run_time') == run_time:
+            return retained
+    except (ValueError, FileNotFoundError):
+        pass
+    raise SpatialDataError('起报批次已更新，请刷新时间轴')
+
+
 def sync_once(models=None):
     ROOT.mkdir(parents=True, exist_ok=True)
     with (ROOT / 'sync.lock').open('a') as lock:
@@ -50,10 +93,10 @@ def sync_once(models=None):
 
 def publish(context):
     status, folder = context['status'], context['folder']
-    # 只发布连续完成的时间前缀，避免乱序下载令滑块对应的时刻跳动。
+    # 只统计连续完成的数据与响应文件，整批就绪前仅更新后台进度。
     available = []
     for i, valid in enumerate(status['expected_times']):
-        if not (folder / f'{i}.npz').exists():
+        if not (folder / f'{i}.npz').exists() or not (folder / f'{i}.wire-v4').exists():
             break
         available.append(valid)
     status['times'] = available
@@ -65,9 +108,21 @@ def publish(context):
             if field in field_times:
                 field_times[field].append(valid)
     status['field_times'] = field_times
-    if len(available) == status['total'] and not status['error']:
+    if status['total'] and len(available) == status['total'] and not status['error']:
         status['state'] = 'ready'
-    write_json(ROOT/status['model']/'status.json', status)
+    model = status['model']
+    active = read_status(model)
+    active_path = ROOT/model/'status.json'
+    pending_path = ROOT/model/'status.pending.json'
+    # 发布指针只在整批完成后替换；先保存旧批次清单，固定批次请求仍可读取它。
+    if status.get('state') == 'ready':
+        if active.get('key') and active.get('times') and active.get('run_time') != status.get('run_time'):
+            write_json(ROOT/model/active['key']/'published.json', active)
+        write_json(folder/'published.json', status)
+        write_json(active_path, status)
+        pending_path.unlink(missing_ok=True)
+    else:
+        write_json(pending_path, status)
 
 
 def download(context, index):
@@ -108,7 +163,7 @@ def download(context, index):
 def _sync_once(models):
     contexts = []
     for model in models:
-        status = read_status(model)
+        status = read_pending_status(model) or read_status(model)
         try:
             manifest = latest_manifest(model)
             run = manifest['reference_time']
@@ -116,6 +171,8 @@ def _sync_once(models):
             folder = ROOT/model/key
             folder.mkdir(parents=True, exist_ok=True)
             times = sorted(set(manifest['valid_times']))
+            if not times:
+                raise SpatialDataError('起报清单没有可缓存的预报时刻')
             status = dict(model=model, run_time=run, times=[], expected_times=times, total=len(times),
                           key=key, state='syncing', error=None, checked_at=datetime.now(timezone.utc).isoformat())
             context = dict(status=status, manifest=manifest, folder=folder,
@@ -124,7 +181,7 @@ def _sync_once(models):
             contexts.append(context)
         except Exception as error:
             status.update(state='error', error=str(error))
-            write_json(ROOT/model/'status.json', status)
+            write_json(ROOT/model/'status.pending.json', status)
 
     # 全模型共用有界线程池；轮流提交近时效，某一模型失败不阻断其他模型。
     queue = deque(contexts)
@@ -158,10 +215,12 @@ def _sync_once(models):
     for context in contexts:
         if context['status']['state'] != 'ready':
             continue
-        # 保留本模型最近两批，不触碰 Open-Meteo 的缓存目录。
+        # 保留当前批次与上一份已发布批次，不能让未完成目录挤掉可用旧批次。
         folders = sorted(p for p in (ROOT/context['status']['model']).iterdir()
                          if p.is_dir() and len(p.name) == 13 and 'T' in p.name)
-        for old in folders[:-2]:
+        published = [p for p in folders if (p/'published.json').exists()]
+        keep = set(published[-2:]) | {context['folder']}
+        for old in (p for p in folders if p not in keep):
             shutil.rmtree(old)
 
 
@@ -169,17 +228,18 @@ async def sync_loop():
     STOP.clear()
     while not STOP.is_set():
         await asyncio.to_thread(sync_once)
-        states = [read_status(model)['state'] for model in MODEL_SPATIAL_NAMES]
+        states = [
+            (read_pending_status(model) or read_status(model))['state']
+            for model in MODEL_SPATIAL_NAMES
+        ]
         delay = 5 if 'syncing' in states else min(30, INTERVAL) if 'error' in states else INTERVAL
         await asyncio.sleep(delay)
 
 
 def locate_field(model, field, run_time=None, valid_time=None):
-    status = read_status(model)
+    status = read_run_status(model, run_time)
     if not status['times']:
         raise SpatialDataError(status.get('error') or '最新起报数据正在提前缓存，请稍后重试')
-    if run_time and run_time != status['run_time']:
-        raise SpatialDataError('起报批次已更新，请刷新时间轴')
     valid = valid_time or status['times'][0]
     if valid not in status['times']:
         raise SpatialDataError('该预报时刻尚未缓存完成')

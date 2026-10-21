@@ -1,7 +1,7 @@
 import asyncio
 import httpx
 from contextlib import asynccontextmanager, suppress
-from .forecast_cache import sync_loop, read_status, cached_field, cached_response, STOP
+from .forecast_cache import sync_loop, read_public_status, cached_field, cached_response, STOP
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -238,11 +238,11 @@ def model_runs(model_id: str) -> dict[str, object]:
         from fastapi.responses import JSONResponse
         # 起报清单会在后台轮换，禁止浏览器和 Cloudflare 复用旧批次。
         return JSONResponse(
-            read_status(model_id),
+            read_public_status(model_id),
             headers={
-                # 浏览器每次重新校验，边缘节点短暂复用，避免多个页面每 10 秒都回源。
-                "Cache-Control": "public, max-age=0, s-maxage=10, stale-while-revalidate=30",
-                "CDN-Cache-Control": "max-age=10, stale-while-revalidate=30",
+                "Cache-Control": "no-store",
+                "CDN-Cache-Control": "no-store",
+                "Cloudflare-CDN-Cache-Control": "no-store",
             },
         )
     except SpatialDataError as error:

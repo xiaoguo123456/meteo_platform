@@ -1,4 +1,5 @@
 import type { Grid } from './windMath';
+export class ForecastRunExpiredError extends Error {}
 export function decodeFrame(buffer:ArrayBuffer):Grid{
  const size=new DataView(buffer).getUint32(0,true);
  const meta=JSON.parse(new TextDecoder().decode(new Uint8Array(buffer,4,size)));
@@ -37,7 +38,7 @@ export function loadFrame(model:string,field:string,run:string,time:string,view:
  const existing=frames.get(key);if(existing){existing.background=background;frames.delete(key);frames.set(key,existing);return existing.promise;}
  const controller=new AbortController(),entry:Entry={controller,pending:true,background,promise:Promise.resolve(null as unknown as Grid)};
  entry.promise=(async()=>{
-  const sparse:Grid={meta:{...geometry(model),valid_time:time,model,field,level:''},u:new Float32Array(),v:new Float32Array(),tiles:{}};
+  const sparse:Grid={meta:{...geometry(model),run_time:run,valid_time:time,model,field,level:''},u:new Float32Array(),v:new Float32Array(),tiles:{}};
   const add=(tile:Grid)=>{const m=tile.meta as Grid['meta']&{tile_x:number;tile_y:number;full_width:number;full_height:number};sparse.meta={...m,width:m.full_width,height:m.full_height};const id=m.tile_y/TILE_SIZE*Math.ceil(m.full_width/TILE_SIZE)+m.tile_x/TILE_SIZE;sparse.tiles![id]={width:m.width,u:tile.u,v:tile.v};remember(prefix+'/'+id,tile);};
   const missing:number[]=[];for(const id of ids){const tile=tileCache.get(prefix+'/'+id);if(tile)add(tile);else missing.push(id);}
   if(missing.length){
@@ -51,8 +52,9 @@ export function loadFrame(model:string,field:string,run:string,time:string,view:
      if(controller.signal.aborted)throw new DOMException('请求已取消','AbortError');
      if(response.ok)break;
      const body=await response.text();let detail='';try{detail=JSON.parse(body).detail||'';}catch{}
+     if(detail.includes('起报批次已更新'))throw new ForecastRunExpiredError(detail);
      throw new Error(detail||`预报数据块读取失败（HTTP ${response.status}）`);
-    }catch(error){if(controller.signal.aborted||attempt)throw error;}
+    }catch(error){if(controller.signal.aborted||error instanceof ForecastRunExpiredError||attempt)throw error;}
    }
    if(!response?.ok)throw new Error('预报数据块暂时不可用');
    const reader=response.body!.getReader();let pending=new Uint8Array(0),last=0,received=0;
