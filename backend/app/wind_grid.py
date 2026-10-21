@@ -11,22 +11,29 @@ _cache = {}
 _lock = asyncio.Lock()
 
 
-def encode_grid(native, model, field="wind"):
+def field_spec(model, field):
+    """要素单位与层次，空间帧和省平均共用。"""
     level = "1000hPa" if model == "gfs" else "2m"
+    specs = {"wind": ("m/s", "80m" if model == "gfs" else "10m"), "temperature": ("°C", level), "pressure": ("hPa", "海平面"),
+             "humidity": ("%", level), "precipitation": ("mm", "地面 · 时段降水")}
+    if field not in specs:
+        raise SpatialDataError("不支持的气象要素")
+    return specs[field]
+
+
+def encode_grid(native, model, field="wind"):
     grid = MODEL_GRIDS.get(model)
     if grid is None:
         raise SpatialDataError("不支持的模型")
     shape = (grid["height"], grid["width"])
-    specs = {"temperature": ("°C", level), "pressure": ("hPa", "海平面"), "humidity": ("%", level), "precipitation": ("mm", "地面")}
-    if field != "wind" and field not in specs:
-        raise SpatialDataError("不支持的气象要素")
+    field_spec(model, field)
     u, v = native['arrays']['u'], native['arrays']['v']
     if u.shape != shape or v.shape != u.shape:
         raise SpatialDataError('该模型网格尚未核验，暂不提供风场')
     if not np.isfinite(u).any() or not np.isfinite(v).any():
         raise SpatialDataError('S3 风分量没有有效值')
     meta = dict(model=model, source='open-meteo-s3', **grid, valid_time=native['valid_time'],
-                units='m/s', level='80m' if model == 'gfs' else '10m',
+                units='m/s', level=field_spec(model, 'wind')[1],
                 variables=[MODEL_VARIABLE_NAMES[model]['u'], MODEL_VARIABLE_NAMES[model]['v']],
                 encoding='float32-le', missing='NaN')
     meta['field'] = field
@@ -38,10 +45,9 @@ def encode_grid(native, model, field="wind"):
         if u.shape != shape or not np.isfinite(u).any():
             raise SpatialDataError('气象要素网格不完整')
         v = np.zeros_like(u)
-        meta['units'], meta['level'] = specs[field]
+        meta['units'], meta['level'] = field_spec(model, field)
         meta['variables'] = [MODEL_VARIABLE_NAMES[model][field]]
         if field == 'precipitation':
-            meta['level'] = '地面 · 时段降水'
             meta['interval_start'] = native.get('interval_start')
     header = json.dumps(meta).encode()
     header += b' ' * (-len(header) % 4)

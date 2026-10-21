@@ -159,7 +159,9 @@ class MultiModelTests(ForecastCacheFixture):
                     running -= 1
         def prepare(folder,index,*args):
             (folder/f'{index}.wire-v4').touch()
-        with patch.object(cache, 'CONCURRENCY', 4), patch.object(cache, 'latest_manifest', return_value=self.manifest), patch.object(cache, 'read_native_snapshot', side_effect=download), patch.object(cache, 'encode_grid'), patch.object(cache, 'prepare_snapshot',side_effect=prepare):
+        def stats(folder,index,*args):
+            (folder/f'{index}.provinces.json').touch()
+        with patch.object(cache, 'CONCURRENCY', 4), patch.object(cache, 'latest_manifest', return_value=self.manifest), patch.object(cache, 'read_native_snapshot', side_effect=download), patch.object(cache, 'encode_grid'), patch.object(cache, 'prepare_snapshot',side_effect=prepare), patch.object(cache, 'write_frame_stats',side_effect=stats):
             cache.sync_once()
         self.assertEqual(set(first[:4]), {'gfs', 'ifs', 'aifs', 'grapes'})
         self.assertEqual(peak, 4)
@@ -169,7 +171,8 @@ class MultiModelTests(ForecastCacheFixture):
 
     def test_out_of_order_frames_publish_stable_prefix(self):
         folder=cache.ROOT/'ifs'/'20261013T0000';folder.mkdir(parents=True)
-        (folder/'1.npz').touch();(folder/'1.wire-v4').touch()
+        for suffix in cache.FRAME_FILES:(folder/f'1.{suffix}').touch()
+        (folder/'0.provinces.json').touch()
         context={'folder':folder,'status':{'model':'ifs','key':folder.name,'run_time':self.manifest['reference_time'],'expected_times':self.manifest['valid_times'],'total':2,'state':'syncing','error':None}}
         cache.publish(context)
         self.assertEqual(context['status']['times'], [])

@@ -13,11 +13,12 @@ export type SatelliteOverlay = {
  track?:{longitude:number;latitude:number}[];
 };
 
-export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satellite,satellites=[],selectedSatelliteId,onSatelliteClick}:{grid:Grid|null;satellite:EarthTexture|null;animated:boolean;onViewChange:(view:Viewport)=>void;onPoint:(point:[number,number])=>void;satellites?:SatelliteOverlay[];selectedSatelliteId?:string;onSatelliteClick?:(id:string)=>void}){
+export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satellite,satellites=[],selectedSatelliteId,onSatelliteClick,highlight=null}:{grid:Grid|null;satellite:EarthTexture|null;animated:boolean;onViewChange:(view:Viewport)=>void;onPoint:(point:[number,number])=>void;satellites?:SatelliteOverlay[];selectedSatelliteId?:string;onSatelliteClick?:(id:string)=>void;highlight?:unknown}){
  const pointCallback=useRef(onPoint);pointCallback.current=onPoint;
  const satelliteCallback=useRef(onSatelliteClick);satelliteCallback.current=onSatelliteClick;
  const satellitesRef=useRef<SatelliteOverlay[]>(satellites);satellitesRef.current=satellites;
  const selectedSatelliteRef=useRef(selectedSatelliteId);selectedSatelliteRef.current=selectedSatelliteId;
+ const highlightRef=useRef(highlight);highlightRef.current=highlight;
  const redraw=useRef<()=>void>(()=>{});
  const [renderError,setRenderError]=useState('');
  const viewCallback=useRef(onViewChange);viewCallback.current=onViewChange;
@@ -42,6 +43,8 @@ export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satelli
   let measuredFrames=0,measuredCost=0,measureStart=performance.now();
   let particles:{x:number;y:number;age:number}[]=[];
   const drawMap=()=>{if(!displayed)return;const {rotation,radius,field}=displayed;const projected=geoOrthographic().rotate(rotation).translate([width/2,height/2]).scale(radius).clipAngle(90);mctx.clearRect(0,0,width,height);const path=geoPath(projected,mctx);mctx.beginPath();path(geoGraticule10());mctx.strokeStyle=field&&field!=='wind'?'rgba(47,77,89,.13)':'rgba(174,191,238,.18)';mctx.lineWidth=.55;mctx.stroke();if(coast){mctx.beginPath();path(coast);mctx.strokeStyle=field&&field!=='wind'?'rgba(47,77,89,.5)':'rgba(187,205,255,.8)';mctx.lineWidth=.65;mctx.stroke();}if(provinces){mctx.beginPath();path(provinces);mctx.strokeStyle=field&&field!=='wind'?'rgba(35,61,67,.65)':'rgba(221,233,245,.8)';mctx.lineWidth=.7;mctx.stroke();}
+   // 省平均选中的省份：浅色描边打底再叠强调色，只描边不填充，避免面环绕方向影响球面填色。
+   if(highlightRef.current){mctx.beginPath();path(highlightRef.current as any);mctx.lineJoin='round';mctx.strokeStyle='rgba(255,255,255,.75)';mctx.lineWidth=4.5;mctx.stroke();mctx.strokeStyle='#d97745';mctx.lineWidth=2.2;mctx.stroke();}
    // 卫星轨迹绘制在边界之上。轨迹必须经过 d3-geo 的球面裁剪，不能只依赖
    // projection(point)：后者即使设置了 clipAngle，也仍会返回背面点的坐标。
    const selectedSatellite=satellitesRef.current.find(item=>item.id===selectedSatelliteRef.current);
@@ -130,5 +133,6 @@ export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satelli
  useEffect(()=>{updateGrid.current(grid);},[grid]);
  useEffect(()=>{updateSatellite.current(satellite);},[satellite]);
  useEffect(()=>{satellitesRef.current=satellites;selectedSatelliteRef.current=selectedSatelliteId;redraw.current();},[satellites,selectedSatelliteId]);
+ useEffect(()=>{highlightRef.current=highlight;redraw.current();},[highlight]);
  return <div className="weather-globe" ref={host} tabIndex={0} aria-label="地球视图，方向键旋转，加减键缩放"><canvas ref={base}/><canvas ref={lines}/><canvas ref={map}/>{renderError&&<div role="alert" className="load-status error">{renderError}</div>}</div>;
 }

@@ -360,6 +360,36 @@ async def point_series(model_id: str, longitude: float, latitude: float, field: 
     except (ValueError, SpatialDataError, OSError, KeyError) as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
+@app.get('/api/provinces')
+def provinces():
+    from fastapi.responses import JSONResponse
+    from .province_stats import province_list
+    return JSONResponse(province_list(), headers={'Cache-Control': 'public, max-age=86400'})
+
+@app.get('/api/provinces/locate')
+def locate_province(longitude: float, latitude: float):
+    """点击位置所在省份；境外或海上返回 null。"""
+    from .province_stats import locate
+    return locate(longitude, latitude)
+
+@app.get('/api/provinces/{code}/outline')
+def province_outline(code: str):
+    from fastapi.responses import JSONResponse
+    from .province_stats import regions
+    region = regions().get(code)
+    if not region:
+        raise HTTPException(status_code=404, detail='省份代码无效')
+    return JSONResponse({'type': 'Feature', 'properties': {'code': code, 'name': region['name']}, 'geometry': region['geometry']},
+                        headers={'Cache-Control': 'public, max-age=86400'})
+
+@app.get('/api/province-forecast/{model_id}')
+async def province_series(model_id: str, code: str, field: str = 'temperature', run_time: str = None):
+    from .province_stats import province_forecast
+    try:
+        return await asyncio.to_thread(province_forecast, model_id, field, code, run_time)
+    except (ValueError, SpatialDataError, OSError, KeyError) as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
 @app.get('/api/satellite/himawari/images/{product}/{time}.display.webp')
 async def satellite_image(product: str, time: str):
     from .satellite_service import display_path

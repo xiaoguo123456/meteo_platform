@@ -37,6 +37,42 @@ def convert(source):
     flush()
     return {'type':'FeatureCollection','features':features},original
 
+def convert_regions(source, tolerance=0.001):
+    """按省级行政区合并 @P 外环与 @H 洞为 MultiPolygon，供省平均统计和选中高亮。"""
+    regions={};current=None;ring=None
+    for line in source.splitlines():
+        if line.startswith('>'):
+            ring=[]
+        elif line.startswith('# @D'):
+            parts=line[4:].split('|');current=None
+            # 中朝共有为界河岛屿，不属于单一省份，不参与省平均。
+            if len(parts)>=5 and parts[-1].strip().isdigit() and parts[1]!='中朝共有':
+                current=regions.setdefault(parts[-1].strip(),{'name':parts[1],'polygons':[]})
+        elif line.startswith('# @P') and current is not None:
+            current['polygons'].append([ring])
+        elif line.startswith('# @H') and current is not None and current['polygons']:
+            current['polygons'][-1].append(ring)
+        elif line and not line.startswith('#') and ring is not None:
+            point=list(map(float,line.split()[:2]))
+            if len(point)!=2 or not all(math.isfinite(v) for v in point):raise ValueError('边界坐标无效')
+            ring.append(point)
+    features=[]
+    for code,region in sorted(regions.items()):
+        polygons=[]
+        for polygon in region['polygons']:
+            rings=[simplify(r,tolerance) for r in polygon]
+            # 简化后不足三角形的微小岛屿保留原始坐标，避免香港、澳门等被整体丢失。
+            rings=[r if len(r)>=4 else polygon[i] for i,r in enumerate(rings)]
+            rings=[[[round(x,4),round(y,4)] for x,y in r] for r in rings if len(r)>=4]
+            if rings:polygons.append(rings)
+        features.append({'type':'Feature','properties':{'code':code,'name':region['name']},
+                         'geometry':{'type':'MultiPolygon','coordinates':polygons}})
+    return {'type':'FeatureCollection','features':features}
+
 if __name__=='__main__':
-    result,count=convert(Path(sys.argv[1]).read_text());Path(sys.argv[2]).write_text(json.dumps(result,ensure_ascii=False,separators=(',',':')))
+    source=Path(sys.argv[1]).read_text()
+    if len(sys.argv)>3:
+        regions=convert_regions(source);Path(sys.argv[3]).write_text(json.dumps(regions,ensure_ascii=False,separators=(',',':')))
+        print('省级面',len(regions['features']))
+    result,count=convert(source);Path(sys.argv[2]).write_text(json.dumps(result,ensure_ascii=False,separators=(',',':')))
     print('线段',len(result['features']),'原始点',count,'绘制点',sum(len(f['geometry']['coordinates']) for f in result['features']))

@@ -3,7 +3,7 @@ import StationForecast from './StationForecast';
 import {SatelliteObservationPanel, SatelliteOrbitPanel, warmSatellite, type SatelliteDetail, type SatelliteSummary} from './SatellitePanel';
 import type {EarthTexture} from './basemap';
 import { useCallback, useEffect, useState, useRef } from 'react';
-import PointForecast from './PointForecast';
+import PointForecast, { type ProvinceOutline } from './PointForecast';
 import PowerOutlook from './PowerOutlook';
 import WeatherGlobe from './WeatherGlobe';
 import type { SatelliteOverlay } from './WeatherGlobe';
@@ -22,7 +22,7 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
  const failedFrame=useRef(false),refreshedRun=useRef<string|null>(null);
  const [frameRevision,setFrameRevision]=useState(0);
  const [satellite,setSatellite]=useState<EarthTexture|null>(null);
- const [point,setPoint]=useState<[number,number]|null>(null);
+ const [point,setPoint]=useState<[number,number]|null>(null),[highlight,setHighlight]=useState<ProvinceOutline|null>(null);
  const [model,setModel]=useState('gfs'),[grid,setGrid]=useState<Grid|null>(null),[field,setField]=useState('wind'),[loading,setLoading]=useState(true),[error,setError]=useState('');
  const [viewport,setViewport]=useState<Viewport|null>(null),[waiting,setWaiting]=useState(false);
  const [batch,setBatch]=useState<Batch|null>(null),[index,setIndex]=useState(0),[playing,setPlaying]=useState(false),[syncError,setSyncError]=useState('');
@@ -132,8 +132,8 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
  if(satelliteDetail){const track=(satelliteDetail.track||[]).map(point=>({longitude:point.longitude,latitude:point.latitude}));const overlay=satelliteOverlays.find(item=>item.id===satelliteDetail.id);if(overlay){overlay.track=track;overlay.position={longitude:satelliteDetail.position?.longitude??overlay.position.longitude,latitude:satelliteDetail.position?.latitude??overlay.position.latitude};}else{satelliteOverlays.push({id:satelliteDetail.id,name:satelliteDetail.name,category:satelliteDetail.category,color:'#d97745',position:{longitude:satelliteDetail.position?.longitude??0,latitude:satelliteDetail.position?.latitude??0},track});}}
 
  return <div className="app-shell"><main className="weather-workspace">
-  <WeatherGlobe onPoint={p=>{if(!satelliteMode)setPoint(p);}} satellite={satelliteObservationMode?satellite:null} onViewChange={setViewport} grid={satelliteMode?null:grid} animated={!satelliteMode&&grid?.meta.field==='wind'} satellites={satelliteOrbitMode?satelliteOverlays:[]} selectedSatelliteId={satelliteOrbitMode?selectedSatelliteId:undefined} onSatelliteClick={satelliteOrbitMode?setSelectedSatelliteId:undefined}/>
-  {!satelliteMode&&point&&displayedRun&&availableFields.length>0&&<PointForecast point={point} model={model} run={displayedRun} available={availableFields} onClose={()=>setPoint(null)}/>}
+  <WeatherGlobe onPoint={p=>{if(!satelliteMode)setPoint(p);}} satellite={satelliteObservationMode?satellite:null} onViewChange={setViewport} grid={satelliteMode?null:grid} animated={!satelliteMode&&grid?.meta.field==='wind'} satellites={satelliteOrbitMode?satelliteOverlays:[]} selectedSatelliteId={satelliteOrbitMode?selectedSatelliteId:undefined} highlight={!satelliteMode&&point?highlight:null} onSatelliteClick={satelliteOrbitMode?setSelectedSatelliteId:undefined}/>
+  {!satelliteMode&&point&&displayedRun&&availableFields.length>0&&<PointForecast point={point} model={model} run={displayedRun} available={availableFields} onClose={()=>setPoint(null)} onHighlight={setHighlight}/>}
 
   {!satelliteMode&&status&&<div role="status" className={`load-status ${error||syncError?'error':''}`}>{status}</div>}
   {satelliteObservationMode?<div className="satellite-modules"><SatelliteObservationPanel onTexture={setSatellite}/></div>:satelliteOrbitMode?<div className="satellite-modules"><SatelliteOrbitPanel satellites={satellites} selectedId={selectedSatelliteId} detail={satelliteDetail} onSelect={setSelectedSatelliteId} orbitAt={orbitAt} orbitCount={orbitCount} onOrbitAtChange={setOrbitAt} onOrbitCountChange={setOrbitCount}/></div>:<aside className="control-panel">

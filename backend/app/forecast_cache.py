@@ -15,7 +15,10 @@ import numpy as np
 from .spatial_provider import latest_manifest, read_native_snapshot, SpatialDataError, MODEL_SPATIAL_NAMES
 from .wind_grid import encode_grid
 from .response_cache import prepare_snapshot, prepare_field
+from .province_stats import write_frame_stats
 
+# 一帧完成需要的全部文件：原始数据、浏览器数据块、省平均统计。
+FRAME_FILES = ('npz', 'wire-v4', 'provinces.json')
 ROOT = Path(os.getenv('WEATHER_FORECAST_CACHE', str(Path(__file__).resolve().parents[2] / 'data/cache/forecasts')))
 STOP = threading.Event()
 CONCURRENCY = max(1, min(4, int(os.getenv("WEATHER_DOWNLOAD_CONCURRENCY", "4"))))
@@ -81,6 +84,10 @@ def read_run_status(model, run_time=None):
     raise SpatialDataError('起报批次已更新，请刷新时间轴')
 
 
+def frame_ready(folder, index):
+    return all((folder/f'{index}.{suffix}').exists() for suffix in FRAME_FILES)
+
+
 def sync_once(models=None):
     ROOT.mkdir(parents=True, exist_ok=True)
     with (ROOT / 'sync.lock').open('a') as lock:
@@ -93,10 +100,10 @@ def sync_once(models=None):
 
 def publish(context):
     status, folder = context['status'], context['folder']
-    # 只统计连续完成的数据与响应文件，整批就绪前仅更新后台进度。
+    # 只统计连续完成的数据、响应与省平均文件，整批就绪前仅更新后台进度。
     available = []
     for i, valid in enumerate(status['expected_times']):
-        if not (folder / f'{i}.npz').exists() or not (folder / f'{i}.wire-v4').exists():
+        if not frame_ready(folder, i):
             break
         available.append(valid)
     status['times'] = available
@@ -138,6 +145,8 @@ def download(context, index):
                 native = dict(arrays=arrays, valid_time=status['expected_times'][index], run_time=status['run_time'])
                 native['interval_start'] = status['expected_times'][index-1] if index else None
                 prepare_snapshot(folder, index, model, native)
+                # 旧批次升级后在此补算省平均，不重新下载。
+                write_frame_stats(folder, index, model, arrays)
                 return
             native = read_native_snapshot(model, context['manifest'], status['expected_times'][index], blocks)
             encode_grid(native, model)
@@ -150,6 +159,7 @@ def download(context, index):
             write_json(folder / f'{index}.json', fields)
             native['interval_start'] = status['expected_times'][index-1] if index else None
             prepare_snapshot(folder, index, model, native)
+            write_frame_stats(folder, index, model, native['arrays'])
             temporary.replace(folder / f'{index}.npz')
             return
         except Exception:
@@ -176,7 +186,7 @@ def _sync_once(models):
             status = dict(model=model, run_time=run, times=[], expected_times=times, total=len(times),
                           key=key, state='syncing', error=None, checked_at=datetime.now(timezone.utc).isoformat())
             context = dict(status=status, manifest=manifest, folder=folder,
-                           pending=deque(i for i in range(len(times)) if not (folder/f'{i}.npz').exists() or not (folder/f'{i}.wire-v4').exists()))
+                           pending=deque(i for i in range(len(times)) if not frame_ready(folder, i)))
             publish(context)
             contexts.append(context)
         except Exception as error:
