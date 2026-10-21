@@ -32,6 +32,9 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
  const [byProvince,setByProvince]=useState(!!shared.byProvince),[shapes,setShapes]=useState<ProvinceShapes|null>(null),[rankOrder,setRankOrder]=useState<'high'|'low'>('high');
  const [provinceValues,setProvinceValues]=useState<{field:string;valid:string;values:Record<string,number[]>}|null>(null),[provinceError,setProvinceError]=useState('');
  const [exportOpen,setExportOpen]=useState(false),[exportFormat,setExportFormat]=useState<ExportFormat>('portrait'),[exportSpan,setExportSpan]=useState(0),[exporting,setExporting]=useState<{done:number;total:number}|null>(null),[exportHidden,setExportHidden]=useState(false);
+ // 控制面板可收起，截图时不遮挡地球；只是本机偏好，记在浏览器里。
+ const [panelHidden,setPanelHidden]=useState(()=>{try{return localStorage.getItem('home-panel-hidden')==='1';}catch{return false;}});
+ useEffect(()=>{try{localStorage.setItem('home-panel-hidden',panelHidden?'1':'0');}catch{/* 隐私模式下不记忆 */}},[panelHidden]);
  const cancelExport=useRef<()=>void>(()=>{}),overlayRef=useRef<()=>Overlay>(()=>({title:'',subtitle:'',time:'',run:'',legend:{colors:[],min:0,max:1,ticks:[]},credit:''})),provinceValuesRef=useRef(provinceValues);provinceValuesRef.current=provinceValues;
  const [model,setModel]=useState(shared.model??'gfs'),[grid,setGrid]=useState<Grid|null>(null),[field,setField]=useState(shared.field??'wind'),[loading,setLoading]=useState(true),[error,setError]=useState('');
  const [viewport,setViewport]=useState<Viewport|null>(null),[waiting,setWaiting]=useState(false);
@@ -165,6 +168,8 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
   credit:`数据：Open-Meteo S3 · ${model.toUpperCase()}　底图：Esri World Imagery　省界：GMT`});
  // 逐帧导出：切到目标时刻后暂停录制，等该帧（按省时连同填色）完整画到屏幕上再录 0.6 秒。
  useEffect(()=>()=>cancelExport.current(),[]);
+ const canPlay=!!activeBatch&&times.length>=2&&!error;
+ const togglePlay=()=>{if(playing){setPlaying(false);return;}if(index>=times.length-1)setIndex(0);setWaiting(false);setPlaying(true);};
  const runExport=async()=>{
   const host=document.querySelector<HTMLElement>('.weather-globe');if(!host||!run||!valid)return;
   setPlaying(false);setExportOpen(false);
@@ -196,13 +201,19 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
   {!satelliteMode&&point&&displayedRun&&availableFields.length>0&&<PointForecast point={point} model={model} run={displayedRun} available={availableFields} province={province} onProvince={setProvince} compare={compare} onCompare={setCompare} onClose={()=>{setPoint(null);setProvince(null);setCompare(false);}} onHighlight={setHighlight}/>}
 
   {!satelliteMode&&status&&<div role="status" className={`load-status ${error||syncError?'error':''}`}>{status}</div>}
-  {satelliteObservationMode?<div className="satellite-modules"><SatelliteObservationPanel onTexture={setSatellite}/></div>:satelliteOrbitMode?<div className="satellite-modules"><SatelliteOrbitPanel satellites={satellites} selectedId={selectedSatelliteId} detail={satelliteDetail} onSelect={setSelectedSatelliteId} orbitAt={orbitAt} orbitCount={orbitCount} onOrbitAtChange={setOrbitAt} onOrbitCountChange={setOrbitCount}/></div>:<aside className={`control-panel ${exporting?'exporting':''}`}>
+  {satelliteObservationMode?<div className="satellite-modules"><SatelliteObservationPanel onTexture={setSatellite}/></div>:satelliteOrbitMode?<div className="satellite-modules"><SatelliteOrbitPanel satellites={satellites} selectedId={selectedSatelliteId} detail={satelliteDetail} onSelect={setSelectedSatelliteId} orbitAt={orbitAt} orbitCount={orbitCount} onOrbitAtChange={setOrbitAt} onOrbitCountChange={setOrbitCount}/></div>:panelHidden?<div className="control-pill" role="group" aria-label="预报控制（已收起）">
+   <button className="pill-play" aria-label={playing?'暂停预报播放':'播放预报'} disabled={!canPlay} onClick={togglePlay}>{playing?'Ⅱ':'▶'}</button>
+   <span className="pill-text"><b>{model.toUpperCase()} · {spec.label}{byProvince?' · 按省':''}</b><small>{time} 北京时间</small></span>
+   {grid&&<span className="pill-legend"><i style={{background:gradient}}/><small>{Number(ticks[0].toFixed(1))}–{Number(ticks[4].toFixed(1))} {spec.unit}</small></span>}
+   <button className="pill-expand" aria-label="展开控制面板" onClick={()=>setPanelHidden(false)}>展开</button>
+  </div>:<aside className={`control-panel ${exporting?'exporting':''}`}>
+   <button className="panel-collapse" aria-label="收起控制面板" onClick={()=>setPanelHidden(true)}>收起</button>
    <div className="control-line"><span className="control-key">模式</span><div className="choice-row">{['gfs','grapes','ifs','aifs'].map(m=><button key={m} className={`choice ${model===m?'active':''}`} onClick={()=>setModel(m)}>{m.toUpperCase()}</button>)}</div></div>
    <div className="control-line"><span className="control-key">要素</span><div className="choice-row">{Object.entries(fields).filter(([id])=>availableFields.includes(id)).map(([id,item])=><button key={id} className={`choice ${field===id?'active':''}`} onClick={()=>{setField(id);setIndex(0);setPlaying(false);}}>{item.label}</button>)}</div></div>
    <div className="control-line"><span className="control-key">地图</span><div className="choice-row">{([[false,'格点'],[true,'按省']] as const).map(([value,label])=><button key={label} className={`choice ${byProvince===value?'active':''}`} aria-pressed={byProvince===value} onClick={()=>setByProvince(value)}>{label}</button>)}</div></div>
    {grid&&<div className="control-line"><span className="control-key">层次</span><span className="choice">{grid.meta.level}{grid.meta.field==='precipitation'&&grid.meta.interval_start?`（${formatTime(grid.meta.interval_start)}—${formatTime(grid.meta.valid_time)}）`:''}</span></div>}
    <div className="run-readout">起报 {formatTime(displayedRun)} · 北京时间{batch?.state==='syncing'&&<span>缓存 {batch.pending_cached??batch.times.length}/{batch.pending_total??batch.total}</span>}{batch?.pending_state==='syncing'&&<span>更新缓存 {batch.pending_cached??0}/{batch.pending_total??0}</span>}</div>
-   <div className="timeline"><button aria-label={playing?'暂停预报播放':'播放预报'} disabled={!activeBatch||times.length<2||!!error} onClick={()=>{if(playing){setPlaying(false);return;}if(index>=times.length-1)setIndex(0);setWaiting(false);setPlaying(true);}}>{playing?'Ⅱ':'▶'}</button><input aria-label="预报时间" type="range" min="0" max={Math.max(0,(times.length||1)-1)} value={index} disabled={!times.length} onChange={e=>{setPlaying(false);setIndex(Number(e.target.value));}}/></div>
+   <div className="timeline"><button aria-label={playing?'暂停预报播放':'播放预报'} disabled={!canPlay} onClick={togglePlay}>{playing?'Ⅱ':'▶'}</button><input aria-label="预报时间" type="range" min="0" max={Math.max(0,(times.length||1)-1)} value={index} disabled={!times.length} onChange={e=>{setPlaying(false);setIndex(Number(e.target.value));}}/></div>
    <div className="timeline-labels"><span>{formatTime(times[0])}</span><span>{formatTime(times[times.length-1])}</span></div>
    <div className="panel-divider"/><div className="forecast-readout"><strong>{time}</strong><span>北京时间</span></div>
    {grid&&<div className="wind-legend"><div style={{background:gradient}}/>{ticks.map((n,i)=><span key={n} style={{position:'absolute',left:`${i*25}%`,transform:i===0?undefined:i===4?'translateX(-100%)':'translateX(-50%)'}}>{n}{i===4?` ${spec.unit}`:''}</span>)}</div>}

@@ -112,3 +112,11 @@ button:focus-visible { outline:2px solid #367a80; outline-offset:5px; border-rad
 .export-box{display:grid;gap:8px;margin-top:10px;padding:10px 12px;border:1px solid #dbe4e5;border-radius:8px;background:#f6f9f9;font-size:12px;color:#526c74}.export-box[role=status]{display:flex;justify-content:space-between;align-items:center}.export-start{justify-self:start;padding:5px 14px;border:0;border-radius:6px;background:#12656b;color:#fff;font-size:12px;cursor:pointer}
 /* 导出期间锁定控制面板，避免中途切换模型或要素打乱录制；取消按钮保持可用。 */
 .control-panel.exporting>*:not(.export-box){pointer-events:none;opacity:.55}
+.panel-collapse{position:absolute;top:12px;right:14px;padding:2px 8px;border:1px solid #cad8db;border-radius:999px;background:transparent;color:#526c74;font-size:11px;cursor:pointer}.panel-collapse:hover{color:#12656b;border-color:#12656b}
+.control-pill{position:absolute;left:29px;bottom:32px;z-index:5;display:flex;align-items:center;gap:12px;max-width:calc(100% - 58px);padding:8px 10px 8px 8px;border:1px solid #c6d7da;border-radius:999px;background:rgba(249,252,251,.92);box-shadow:0 6px 20px rgba(36,67,77,.08);backdrop-filter:blur(12px);color:#203c43}
+.control-pill .pill-play{flex:none;width:27px;height:27px;border:1px solid #8caeb2;border-radius:50%;background:transparent;color:#215f66;font-size:11px}.control-pill .pill-play:disabled{opacity:.4}
+.pill-text{display:grid;line-height:1.25;white-space:nowrap}.pill-text b{font-size:12px;font-weight:600}.pill-text small{font-size:11px;color:#526c74;font-variant-numeric:tabular-nums}
+.pill-legend{display:grid;gap:3px;font-size:10px;color:#526c74;white-space:nowrap}.pill-legend i{display:block;width:96px;height:5px;border-radius:2px}
+.pill-expand{flex:none;padding:3px 10px;border:1px solid #cad8db;border-radius:999px;background:transparent;color:#12656b;font-size:11px;cursor:pointer}
+@media(max-width:740px){.control-pill{left:15px;max-width:calc(100% - 30px)}}
+@media(max-width:470px){.pill-legend{display:none}}
