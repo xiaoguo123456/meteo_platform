@@ -323,7 +323,7 @@ async def himawari_station_image(station_id: str, product: str = 'truecolor'):
         observed, content = await station_image(station_id, station['latitude'], station['longitude'], product)
         west, south, east, north = local_image_bounds(station['longitude'], station['latitude'])
         return Response(content, media_type='image/webp', headers={
-            'Cache-Control': 'public, max-age=300',
+            'Cache-Control': 'public, max-age=60',
             'X-Satellite-Time': observed,
             'X-Satellite-Product': product,
             'X-Satellite-Bounds': f'{west:.6f},{south:.6f},{east:.6f},{north:.6f}',

@@ -6,6 +6,7 @@ import math
 import os
 import re
 import time
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -15,10 +16,20 @@ from PIL import Image
 TARGET_TIMES_URL = 'https://www.jma.go.jp/bosai/himawari/data/satimg/targetTimes_fd.json'
 ROOT = Path(os.getenv('METEO_DATA_DIR', str(Path(__file__).resolve().parents[2]/'data')))/'satellite/himawari'
 KEEP = 36
+# 清单之外多留几帧，前端清单最多晚一分钟刷新，旧时刻仍要能读到。
+RETAIN_EXTRA = 2
+# zoom 3 全圆盘正常有 48 块（其余 16 块在圆盘外为 404）；不足说明 JMA 仍在上传。
+FULL_DISK_TILES = 48
 PRODUCTS = {'truecolor': 'REP/ETC', 'infrared': 'B13/TBB'}
 LOCAL_ZOOM = 5
-LOCAL_CACHE_TTL = 300
-_LOCAL_CACHE: dict[tuple[str, str], tuple[float, str, bytes]] = {}
+LOCAL_CACHE_TTL = 60
+LOCAL_CACHE_SIZE = 200
+LOCAL_CANDIDATES = 3
+_LOCAL_CACHE: 'OrderedDict[tuple[str, str], tuple[float, str, bytes]]' = OrderedDict()
+
+
+class FrameNotReady(Exception):
+    """上游该时刻尚未上传完整，下一轮再取，不算同步故障。"""
 
 
 def product_root(product):
@@ -38,7 +49,7 @@ def catalog(product='truecolor'):
 def write_status(error=None, product='truecolor'):
     root=product_root(product);root.mkdir(parents=True,exist_ok=True)
     times=sorted(p.stem for p in root.glob('*.webp') if re.fullmatch(r'\d{14}',p.stem))
-    for old in times[:-KEEP]:
+    for old in times[:-(KEEP+RETAIN_EXTRA)]:
         (root/f'{old}.webp').unlink(missing_ok=True)
         (root/f'{old}.display.webp').unlink(missing_ok=True)
     value={'source':'Himawari-9','product':product,'projection':'EPSG:3857','zoom':3,
@@ -98,7 +109,8 @@ async def sync_satellite():
                 if r.status_code==404:return x,y,None
                 r.raise_for_status();return x,y,r.content
         # 每种产品先发布最新帧，再补历史；故障隔离，避免一种产品阻塞另一种。
-        failed=set()
+        # 未上传完整的时刻直接跳过，不发布缺块帧，也不因最新帧未就绪而报错、停止补历史。
+        failed,waiting=set(),{product:None for product in PRODUCTS}
         for t in reversed(times):
             for product in PRODUCTS:
                 if product in failed:continue
@@ -112,13 +124,19 @@ async def sync_satellite():
                     continue
                 try:
                     tiles=await asyncio.gather(*(tile(t,x,y,product) for x in range(8) for y in range(8)))
-                    if not any(body for _,_,body in tiles):raise ValueError('葵花观测瓦片尚未发布')
+                    count=sum(1 for _,_,body in tiles if body)
+                    if count<FULL_DISK_TILES:raise FrameNotReady(f'葵花观测瓦片尚未上传完整（{count}/{FULL_DISK_TILES}）')
                     await asyncio.to_thread(save_mosaic,t,tiles,product)
                     write_status(product=product)
+                except FrameNotReady as error:
+                    waiting[product]=waiting[product] or str(error)
                 except Exception as error:
                     failed.add(product);write_status(str(error) or type(error).__name__,product)
         for product in PRODUCTS:
-            if product not in failed:write_status(product=product)
+            if product in failed:continue
+            # 已有可用帧时上游延迟不提示；一帧都没有才说明原因。
+            published=catalog(product)['times']
+            write_status(None if published else waiting[product],product)
 
 
 async def satellite_loop():
@@ -166,36 +184,68 @@ def local_image_bounds(longitude: float, latitude: float, zoom: int = LOCAL_ZOOM
     return lon(x0), lat(y1 + 1), lon(x1 + 1), lat(y0)
 
 
+async def _fetch_local_tiles(client, observed, product, tile_range):
+    x0, y0, x1, y1 = tile_range
+    semaphore = asyncio.Semaphore(8)
+
+    async def fetch_tile(x: int, y: int) -> tuple[int, int, Optional[bytes]]:
+        url = f'https://www.jma.go.jp/bosai/himawari/data/satimg/{observed}/fd/{observed}/{PRODUCTS[product]}/{LOCAL_ZOOM}/{x}/{y}.jpg'
+        async with semaphore:
+            tile_response = await client.get(url)
+        if tile_response.status_code == 404:
+            return x, y, None
+        tile_response.raise_for_status()
+        return x, y, tile_response.content
+
+    return await asyncio.gather(*(fetch_tile(x, y) for y in range(y0, y1 + 1) for x in range(x0, x1 + 1)))
+
+
+async def _local_candidates(client, product):
+    # 优先用全球缓存已完整发布的时刻，避免拿到 JMA 刚列出、仍在上传的最新时刻。
+    times = catalog(product)['times']
+    if not times:
+        response = await client.get(TARGET_TIMES_URL)
+        response.raise_for_status()
+        times = sorted({item.get('basetime') or item.get('validtime') for item in response.json() if re.fullmatch(r'\d{14}', item.get('basetime', '') or item.get('validtime', ''))})
+    if not times:
+        raise RuntimeError('葵花观测暂无可用时刻')
+    return times[::-1][:LOCAL_CANDIDATES]
+
+
+def _remember_local(cache_key, observed, result):
+    _LOCAL_CACHE[cache_key] = (time.monotonic(), observed, result)
+    _LOCAL_CACHE.move_to_end(cache_key)
+    # 站点上万个，按最近使用淘汰，避免进程内存随浏览站点数持续增长。
+    while len(_LOCAL_CACHE) > LOCAL_CACHE_SIZE:
+        _LOCAL_CACHE.popitem(last=False)
+
+
 async def station_image(station_key: str, latitude: float, longitude: float, product: str = 'truecolor') -> tuple[str, bytes]:
     """按站点 bbox 获取葵花 Web Mercator 局部瓦片并拼图，避免裁剪全球空白图。"""
     if product not in PRODUCTS:
         raise ValueError('卫星产品无效')
     cache_key = (station_key, product)
-    cached = _LOCAL_CACHE.get(cache_key)
-    if cached and time.monotonic() - cached[0] < LOCAL_CACHE_TTL:
-        return cached[1], cached[2]
+    tile_range = _local_tile_range(longitude, latitude)
     async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
-        response = await client.get(TARGET_TIMES_URL)
-        response.raise_for_status()
-        times = sorted({item.get('basetime') or item.get('validtime') for item in response.json() if re.fullmatch(r'\d{14}', item.get('basetime', '') or item.get('validtime', ''))})
-        if not times:
-            raise RuntimeError('葵花观测暂无可用时刻')
-        observed = times[-1]
-        x0, y0, x1, y1 = _local_tile_range(longitude, latitude)
-        semaphore = asyncio.Semaphore(8)
-
-        async def fetch_tile(x: int, y: int) -> tuple[int, int, Optional[bytes]]:
-            url = f'https://www.jma.go.jp/bosai/himawari/data/satimg/{observed}/fd/{observed}/{PRODUCTS[product]}/{LOCAL_ZOOM}/{x}/{y}.jpg'
-            async with semaphore:
-                tile_response = await client.get(url)
-            if tile_response.status_code == 404:
-                return x, y, None
-            tile_response.raise_for_status()
-            return x, y, tile_response.content
-
-        tiles = await asyncio.gather(*(fetch_tile(x, y) for y in range(y0, y1 + 1) for x in range(x0, x1 + 1)))
-    if not any(body for _, _, body in tiles):
+        candidates = await _local_candidates(client, product)
+        cached = _LOCAL_CACHE.get(cache_key)
+        # 已是最新完整时刻则一直复用；退回旧时刻的结果只短暂复用，尽快换上新帧。
+        if cached and (cached[1] == candidates[0] or time.monotonic() - cached[0] < LOCAL_CACHE_TTL):
+            _LOCAL_CACHE.move_to_end(cache_key)
+            return cached[1], cached[2]
+        best = None
+        for observed in candidates:
+            tiles = await _fetch_local_tiles(client, observed, product, tile_range)
+            count = sum(1 for _, _, body in tiles if body)
+            if count and (best is None or count > best[2]):
+                best = (observed, tiles, count)
+            # 缺块说明仍在上传，退回上一时刻；圆盘边缘站点本就缺块，则取块数最多的一帧。
+            if count == len(tiles):
+                break
+    if not best:
         raise RuntimeError('葵花局部瓦片尚未发布')
+    observed, tiles, _ = best
+    x0, y0, x1, y1 = tile_range
     cols, rows = x1 - x0 + 1, y1 - y0 + 1
     image = Image.new('RGBA', (cols * 256, rows * 256), (235, 243, 243, 255))
     for x, y, body in tiles:
@@ -210,7 +260,7 @@ async def station_image(station_key: str, latitude: float, longitude: float, pro
     output = io.BytesIO()
     image.save(output, format='WEBP', quality=88, method=4)
     result = output.getvalue()
-    _LOCAL_CACHE[cache_key] = (time.monotonic(), observed, result)
+    _remember_local(cache_key, observed, result)
     return observed, result
 
 
