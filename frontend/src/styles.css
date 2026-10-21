@@ -109,3 +109,6 @@ button:focus-visible { outline:2px solid #367a80; outline-offset:5px; border-rad
 .rank-card{margin-top:12px;padding-top:10px;border-top:1px solid #dbe4e5;font-size:12px;color:#526c74}.rank-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}.rank-head .choice{font-size:12px}
 .rank-card ol{margin:0;padding:0;list-style:none}.rank-card li button{display:grid;grid-template-columns:18px 1fr auto;align-items:center;gap:8px;width:100%;padding:4px 0;border:0;background:none;color:#203c43;font:inherit;text-align:left;cursor:pointer}.rank-card li button:hover span{color:#12656b;text-decoration:underline}.rank-card b{color:#8a9ea3;font-weight:600}.rank-card em{font-style:normal;font-variant-numeric:tabular-nums}.rank-note{margin:4px 0}
 .rank-note.warn{color:#8a6030;font-size:11px}
+.export-box{display:grid;gap:8px;margin-top:10px;padding:10px 12px;border:1px solid #dbe4e5;border-radius:8px;background:#f6f9f9;font-size:12px;color:#526c74}.export-box[role=status]{display:flex;justify-content:space-between;align-items:center}.export-start{justify-self:start;padding:5px 14px;border:0;border-radius:6px;background:#12656b;color:#fff;font-size:12px;cursor:pointer}
+/* 导出期间锁定控制面板，避免中途切换模型或要素打乱录制；取消按钮保持可用。 */
+.control-panel.exporting>*:not(.export-box){pointer-events:none;opacity:.55}

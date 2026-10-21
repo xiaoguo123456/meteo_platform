@@ -84,7 +84,7 @@ export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satelli
   const submit=()=>{if(busy||!pending||disposed)return;busy=true;worker.postMessage(pending);pending=null;};
   let reported='';
   const report=()=>{const value={width,height,radius,rotation:[...rotation] as [number,number,number]},key=JSON.stringify(value);if(key!==reported){reported=key;viewCallback.current(value);}};
-  const request=(coarse=false)=>{version++;vectors=null;radius=Math.min(width*.46,height*.46)*zoom;if(!coarse)report();pending={id:version,generation,width,height,radius,rotation:[...rotation],coarse};submit();};
+  const request=(coarse=false)=>{version++;vectors=null;radius=Math.min(width*.46,height*.46)*zoom;container.dataset.radius=String(radius);if(!coarse)report();pending={id:version,generation,width,height,radius,rotation:[...rotation],coarse};submit();};
   const rebuild=()=>{clearTimeout(rebuildTimer);request(true);rebuildTimer=setTimeout(()=>request(false),100);};
   const respawn=(p:{x:number;y:number;age:number})=>{for(let n=0;n<100;n++){p.x=Math.random()*width;p.y=Math.random()*height;if(vectors&&Number.isFinite(vectors[(Math.floor(p.y)*width+Math.floor(p.x))*3])){p.age=0;return;}}p.age=101;};
   worker.onmessage=({data})=>{
@@ -95,6 +95,8 @@ export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satelli
     raster.width=data.width;raster.height=data.height;raster.getContext('2d')!.putImageData(new ImageData(data.pixels,data.width,data.height),0,0);
     // 新画面和边界在同一帧提交；计算过程中不清空上一帧。
     displayed=data;drawBase();drawMap();ctx.clearRect(0,0,width,height);
+    // 导出动图据此判断某一帧已完整画到屏幕上，再继续录制。
+    if(!data.coarse&&data.id===version&&data.meta?.complete)container.dataset.rendered=`${data.meta.model}|${data.field}|${data.meta.valid_time}`;
     if(!data.coarse&&data.id===version&&data.meta?.complete&&data.meta.requestedAt){
      const entry={model:data.meta.model,field:data.field,time:data.meta.valid_time,totalMs:Math.round(performance.now()-data.meta.requestedAt+(data.meta.waitMs||0)),waitMs:Math.round(data.meta.waitMs||0),buildMs:Math.round(data.elapsed)};
      if(samples[samples.length-1]?.time!==entry.time||samples[samples.length-1]?.field!==entry.field||samples[samples.length-1]?.model!==entry.model){samples.push(entry);if(samples.length>120)samples.shift();}
