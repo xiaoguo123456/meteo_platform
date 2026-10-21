@@ -33,8 +33,9 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
  const [provinceValues,setProvinceValues]=useState<{field:string;valid:string;values:Record<string,number[]>}|null>(null),[provinceError,setProvinceError]=useState('');
  const [exportOpen,setExportOpen]=useState(false),[exportFormat,setExportFormat]=useState<ExportFormat>('portrait'),[exportSpan,setExportSpan]=useState(0),[exporting,setExporting]=useState<{done:number;total:number}|null>(null),[exportHidden,setExportHidden]=useState(false);
  // 控制面板可收起，截图时不遮挡地球；只是本机偏好，记在浏览器里。
- const [panelHidden,setPanelHidden]=useState(()=>{try{return localStorage.getItem('home-panel-hidden')==='1';}catch{return false;}});
- useEffect(()=>{try{localStorage.setItem('home-panel-hidden',panelHidden?'1':'0');}catch{/* 隐私模式下不记忆 */}},[panelHidden]);
+ // 点击时直接写入，不依赖渲染后的副作用，紧接着刷新或跳转也不会丢。
+ const [panelHidden,setPanelHiddenState]=useState(()=>{try{return localStorage.getItem('home-panel-hidden')==='1';}catch{return false;}});
+ const setPanelHidden=(value:boolean)=>{setPanelHiddenState(value);try{localStorage.setItem('home-panel-hidden',value?'1':'0');}catch{/* 隐私模式下不记忆 */}};
  const cancelExport=useRef<()=>void>(()=>{}),overlayRef=useRef<()=>Overlay>(()=>({title:'',subtitle:'',time:'',run:'',legend:{colors:[],min:0,max:1,ticks:[]},credit:''})),provinceValuesRef=useRef(provinceValues);provinceValuesRef.current=provinceValues;
  const [model,setModel]=useState(shared.model??'gfs'),[grid,setGrid]=useState<Grid|null>(null),[field,setField]=useState(shared.field??'wind'),[loading,setLoading]=useState(true),[error,setError]=useState('');
  const [viewport,setViewport]=useState<Viewport|null>(null),[waiting,setWaiting]=useState(false);
