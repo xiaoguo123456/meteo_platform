@@ -2,6 +2,13 @@ import { geoOrthographic } from 'd3-geo';
 import { sample, fieldColor, type Grid } from './windMath';
 import { textureColor, type EarthTexture } from './basemap';
 let grid:Grid|null=null,texture:EarthTexture|null=null,satellite:EarthTexture|null=null;
+// 云量像卫星云图：晴空透出真彩色底图（略压暗以衬托云），云量越大越接近不透明的白，薄云带一点灰。
+const cloudColor=(base:number[],cover:number)=>{
+ // 透明度随云量略呈加速增长：中等云量保持半透明以显出层次，满云量也留一点底图纹理。
+ const amount=Math.max(0,Math.min(1,(cover-5)/90)),alpha=Math.pow(amount,1.15)*.86;
+ const white=[206+46*amount,215+38*amount,224+30*amount];
+ return base.map((value,i)=>Math.round(value*.8*(1-alpha)+white[i]*alpha));
+};
 // 按省填色时只画底图与风矢量，格点色块由省份填色代替。
 let colorize=true;
 let geometryKey='';
@@ -45,7 +52,8 @@ self.onmessage=({data})=>{
    const field=grid.meta.field||'wind';
    const tint=fieldColor(field,field==='wind'?s:u);
    const opacity=texture?.pixels?(field==='wind'?.72:.66):1;
-   if(colorize)color=color.map((base,i)=>Math.round(base*(1-opacity)+tint[i]*opacity));
+   if(colorize&&field==='cloud'&&texture?.pixels)color=cloudColor(color,u);
+   else if(colorize)color=color.map((base,i)=>Math.round(base*(1-opacity)+tint[i]*opacity));
    if(vectors){
     const cos=Math.max(.02,Math.cos(ll[1]*Math.PI/180)),step=.001;
     const east=point.east??(point.east=projection([ll[0]+step,ll[1]])),north=point.north??(point.north=projection([ll[0],ll[1]+step]));
