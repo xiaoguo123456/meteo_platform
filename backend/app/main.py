@@ -59,6 +59,14 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "meteo-api"}
 
 
+@app.get("/api/version")
+def version():
+    """返回当前运行代码对应的 git 提交，用于核对线上部署版本。"""
+    from fastapi.responses import JSONResponse
+    from .build_info import build_info
+    return JSONResponse(build_info(), headers={"Cache-Control": "no-store", "CDN-Cache-Control": "no-store"})
+
+
 @app.get("/api/basemap/world-imagery")
 async def world_imagery_basemap():
     """服务端缓存 Esri 全球影像，浏览器后续直接命中本地响应。"""

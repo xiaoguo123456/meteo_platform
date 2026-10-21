@@ -70,4 +70,6 @@ S3 预缓存增加 `.v2.gz` 浏览器响应文件：保留原始浮点值的字�
 
 公钥需要提前加入服务器 `/root/.ssh/authorized_keys`。私钥只进入 GitHub Actions Secret，不提交到仓库。部署包会排除 `backend/.env.news`、`data`、本地虚拟环境和构建产物，服务器上已有的模型缓存、资讯数据库和模型密钥会保留。
 
+打包前流程把本次提交哈希、提交时间和构建时间写入 `backend/app/build_info.json`（不入库），部署后访问 `https://meteo.weishenai.cn/api/version` 即可核对线上运行的代码版本；本地开发没有该文件时直接读取 git，`dirty` 表示有未提交改动。
+
 部署完成后流程会等待 `http://127.0.0.1:8091/api/health` 返回成功，并输出后端和资讯 Worker 容器状态。主机 Nginx 和 Certbot 续期由 systemd 管理；证书续期后自动 reload Nginx。Open-Meteo 服务使用独立 Compose 项目，不会被这条流程重启。

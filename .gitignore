@@ -15,3 +15,5 @@ data/*
 .env.news
 
 .playwright-mcp/
+
+backend/app/build_info.json

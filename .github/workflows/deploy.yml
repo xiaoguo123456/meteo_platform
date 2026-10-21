@@ -45,6 +45,22 @@ jobs:
           npm ci
           npm run build
 
+      - name: 写入版本信息
+        run: |
+          set -eu
+          # 部署包不含 .git，提前写入提交信息供 /api/version 核对线上版本。
+          python3 - <<'PY'
+          import json, subprocess
+          from datetime import datetime, timezone
+          git = lambda *args: subprocess.check_output(['git', *args], text=True).strip()
+          info = dict(commit=git('rev-parse', 'HEAD'), committed_at=git('log', '-1', '--format=%cI'),
+                      subject=git('log', '-1', '--format=%s'), built_at=datetime.now(timezone.utc).isoformat(),
+                      run_id='${{ github.run_id }}')
+          info['short'] = info['commit'][:7]
+          open('backend/app/build_info.json', 'w').write(json.dumps(info, ensure_ascii=False))
+          PY
+          cat backend/app/build_info.json
+
       - name: 打包部署文件
         run: |
           tar --exclude='./.git' \
