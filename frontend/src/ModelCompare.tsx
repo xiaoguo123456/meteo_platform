@@ -44,8 +44,8 @@ export default function ModelCompare({point,province,field}:{point:[number,numbe
     {hoverTime!=null&&ok.map(r=>{const v=valueAt(r.points,hoverTime);return v==null?null:<circle key={r.model} cx={x(hoverTime)} cy={y(v)} r="3.5" fill={COLORS[r.model]}/>;})}
    </svg>
    <ul className="compare-legend">{results.map(r=><li key={r.model}><i style={{background:COLORS[r.model]}}/><b>{r.model.toUpperCase()}</b>
-    <span>{r.state==='ok'?`${r.level} · ${time(r.run!)}时起报${hoverTime!=null?` · ${valueAt(r.points,hoverTime)?.toFixed(digits)??'—'} ${spec.unit}`:''}`:r.state==='loading'?'读取中…':r.state==='missing'?'不提供该要素':r.state==='empty'?'暂无可用预报':r.message}</span></li>)}</ul>
-   <div className="run-readout">{hoverTime!=null?`${time(new Date(hoverTime).toISOString())} · 各模型取最近一帧`:spread?`未来 24 小时 ${spread.models} 个模型最多相差 ${spread.spread.toFixed(digits)} ${spec.unit}（${time(spread.time)}时）`:'模型时段不重叠，暂无法比较'}</div>
+    <span>{r.state==='ok'?`${r.level} · ${time(r.run!)} 起报${hoverTime!=null?` · ${valueAt(r.points,hoverTime)?.toFixed(digits)??'—'} ${spec.unit}`:''}`:r.state==='loading'?'读取中…':r.state==='missing'?'不提供该要素':r.state==='empty'?'暂无可用预报':r.message}</span></li>)}</ul>
+   <div className="run-readout">{hoverTime!=null?`${time(new Date(hoverTime).toISOString())} · 各模型取最近一帧`:spread?`未来 24 小时 ${spread.models} 个模型最多相差 ${spread.spread.toFixed(digits)} ${spec.unit}（${time(spread.time)}）`:'模型时段不重叠，暂无法比较'}</div>
    {/* GFS 的风在 80m、温湿在 1000hPa，与其他模型的 10m/2m 不同层次。 */}
    {['wind','temperature','humidity'].includes(field)&&ok.some(r=>r.model==='gfs')&&<p className="compare-note">GFS 高度与其他模型不同，仅供参考</p>}
   </>}
