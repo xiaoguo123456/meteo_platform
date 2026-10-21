@@ -13,7 +13,7 @@ export type SatelliteOverlay = {
  track?:{longitude:number;latitude:number}[];
 };
 
-export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satellite,satellites=[],selectedSatelliteId,onSatelliteClick,highlight=null}:{grid:Grid|null;satellite:EarthTexture|null;animated:boolean;onViewChange:(view:Viewport)=>void;onPoint:(point:[number,number])=>void;satellites?:SatelliteOverlay[];selectedSatelliteId?:string;onSatelliteClick?:(id:string)=>void;highlight?:unknown}){
+export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satellite,satellites=[],selectedSatelliteId,onSatelliteClick,highlight=null,initialView}:{grid:Grid|null;satellite:EarthTexture|null;animated:boolean;onViewChange:(view:Viewport)=>void;onPoint:(point:[number,number])=>void;satellites?:SatelliteOverlay[];selectedSatelliteId?:string;onSatelliteClick?:(id:string)=>void;highlight?:unknown;initialView?:{zoom:number;rotation:[number,number,number]}}){
  const pointCallback=useRef(onPoint);pointCallback.current=onPoint;
  const satelliteCallback=useRef(onSatelliteClick);satelliteCallback.current=onSatelliteClick;
  const satellitesRef=useRef<SatelliteOverlay[]>(satellites);satellitesRef.current=satellites;
@@ -25,7 +25,7 @@ export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satelli
  const updateSatellite=useRef<(value:EarthTexture|null)=>void>(()=>{});
  const updateGrid=useRef<(value:Grid|null)=>void>(()=>{});
  const host=useRef<HTMLDivElement>(null),base=useRef<HTMLCanvasElement>(null),lines=useRef<HTMLCanvasElement>(null),map=useRef<HTMLCanvasElement>(null);
- const view=useRef<{zoom:number;rotation:[number,number,number]}>({zoom:1,rotation:[-115,-12,0]});
+ const view=useRef<{zoom:number;rotation:[number,number,number]}>(initialView??{zoom:1,rotation:[-115,-12,0]});
  const enabled=useRef(animated);enabled.current=animated;
  useEffect(()=>{
   if(!host.current||!base.current||!lines.current||!map.current)return;

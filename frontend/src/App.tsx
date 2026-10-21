@@ -10,6 +10,7 @@ import type { SatelliteOverlay } from './WeatherGlobe';
 import { ESRI_CREDIT } from './basemap';
 import { cancelPendingFrames, ForecastRunExpiredError, loadFrame } from './frameLoader';
 import type { Viewport } from './viewTiles';
+import { buildShare, nearestTime, parseShare } from './share';
 import { fields, type Grid } from './windMath';
 
 type Batch={model:string;run_time:string|null;times:string[];field_times?:Record<string,string[]>;total:number;state:string;error:string|null;pending_run_time?:string|null;pending_cached?:number;pending_total?:number;pending_state?:string;pending_error?:string|null};
@@ -22,8 +23,11 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
  const failedFrame=useRef(false),refreshedRun=useRef<string|null>(null);
  const [frameRevision,setFrameRevision]=useState(0);
  const [satellite,setSatellite]=useState<EarthTexture|null>(null);
- const [point,setPoint]=useState<[number,number]|null>(null),[highlight,setHighlight]=useState<ProvinceOutline|null>(null);
- const [model,setModel]=useState('gfs'),[grid,setGrid]=useState<Grid|null>(null),[field,setField]=useState('wind'),[loading,setLoading]=useState(true),[error,setError]=useState('');
+ // 分享链接只在打开页面时读取一次；之后页面状态实时写回地址栏。
+ const shared=useRef(parseShare(location.hash,Object.keys(fields))).current;
+ const pendingTime=useRef(shared.time),[shareNote,setShareNote]=useState(''),[manualLink,setManualLink]=useState('');
+ const [point,setPoint]=useState<[number,number]|null>(shared.point??null),[highlight,setHighlight]=useState<ProvinceOutline|null>(null),[province,setProvince]=useState<string|null>(shared.province??null);
+ const [model,setModel]=useState(shared.model??'gfs'),[grid,setGrid]=useState<Grid|null>(null),[field,setField]=useState(shared.field??'wind'),[loading,setLoading]=useState(true),[error,setError]=useState('');
  const [viewport,setViewport]=useState<Viewport|null>(null),[waiting,setWaiting]=useState(false);
  const [batch,setBatch]=useState<Batch|null>(null),[index,setIndex]=useState(0),[playing,setPlaying]=useState(false),[syncError,setSyncError]=useState('');
  const [satellites,setSatellites]=useState<SatelliteSummary[]>([]),[selectedSatelliteId,setSelectedSatelliteId]=useState(''),[satelliteDetail,setSatelliteDetail]=useState<SatelliteDetail|null>(null);
@@ -65,6 +69,18 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
  const availableFields=Object.keys(fields).filter(id=>(activeBatch?.field_times?.[id]?.length??0)>0);
  useEffect(()=>{if(availableFields.length&&!availableFields.includes(field)){setField(availableFields[0]);setIndex(0);}},[field,availableFields.join(',')]);
  const run=activeBatch?.run_time, valid=times[index];
+ useEffect(()=>{
+  if(!pendingTime.current||!times.length||!availableFields.includes(field))return;
+  const {index:next,exact}=nearestTime(times,pendingTime.current);pendingTime.current=undefined;setIndex(next);
+  if(!exact){setShareNote('分享的时刻已不在当前预报中，已切到最近时刻');setTimeout(()=>setShareNote(''),6000);}
+ },[times.join(','),availableFields.join(','),field]);
+ const shareHash=()=>buildShare({model,field,time:valid,center:viewport?[-viewport.rotation[0],-viewport.rotation[1]]:undefined,zoom:viewport?viewport.radius/(Math.min(viewport.width,viewport.height)*.46):undefined,point:point??undefined,province:point?province??undefined:undefined});
+ // 替换而非新增历史记录，拖动时间轴不会塞满浏览器后退列表；等链接里的时刻恢复后才开始写。
+ useEffect(()=>{if(satelliteMode||pendingTime.current)return;const timer=setTimeout(()=>history.replaceState(null,'',shareHash()),400);return()=>clearTimeout(timer);},[satelliteMode,model,field,valid,viewport,point,province]);
+ // 剪贴板接口被拒时退回旧式复制；仍失败则把链接选中显示，由用户手动复制。
+ const copyLink=async()=>{const url=`${location.origin}${location.pathname}${shareHash()}`;let copied=false;
+  try{await navigator.clipboard.writeText(url);copied=true;}catch{const area=document.createElement('textarea');area.value=url;area.style.position='fixed';area.style.opacity='0';document.body.appendChild(area);area.select();try{copied=document.execCommand('copy');}catch{}area.remove();}
+  setManualLink(copied?'':url);setShareNote(copied?'链接已复制':'无法自动复制，请手动复制');setTimeout(()=>setShareNote(''),3000);};
  const handleFrameError=useCallback((e:unknown)=>{
   if(e instanceof Error&&e.name==='AbortError')return;
   failedFrame.current=true;setPlaying(false);setWaiting(false);
@@ -132,8 +148,8 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
  if(satelliteDetail){const track=(satelliteDetail.track||[]).map(point=>({longitude:point.longitude,latitude:point.latitude}));const overlay=satelliteOverlays.find(item=>item.id===satelliteDetail.id);if(overlay){overlay.track=track;overlay.position={longitude:satelliteDetail.position?.longitude??overlay.position.longitude,latitude:satelliteDetail.position?.latitude??overlay.position.latitude};}else{satelliteOverlays.push({id:satelliteDetail.id,name:satelliteDetail.name,category:satelliteDetail.category,color:'#d97745',position:{longitude:satelliteDetail.position?.longitude??0,latitude:satelliteDetail.position?.latitude??0},track});}}
 
  return <div className="app-shell"><main className="weather-workspace">
-  <WeatherGlobe onPoint={p=>{if(!satelliteMode)setPoint(p);}} satellite={satelliteObservationMode?satellite:null} onViewChange={setViewport} grid={satelliteMode?null:grid} animated={!satelliteMode&&grid?.meta.field==='wind'} satellites={satelliteOrbitMode?satelliteOverlays:[]} selectedSatelliteId={satelliteOrbitMode?selectedSatelliteId:undefined} highlight={!satelliteMode&&point?highlight:null} onSatelliteClick={satelliteOrbitMode?setSelectedSatelliteId:undefined}/>
-  {!satelliteMode&&point&&displayedRun&&availableFields.length>0&&<PointForecast point={point} model={model} run={displayedRun} available={availableFields} onClose={()=>setPoint(null)} onHighlight={setHighlight}/>}
+  <WeatherGlobe onPoint={p=>{if(!satelliteMode)setPoint(p);}} satellite={satelliteObservationMode?satellite:null} onViewChange={setViewport} grid={satelliteMode?null:grid} animated={!satelliteMode&&grid?.meta.field==='wind'} satellites={satelliteOrbitMode?satelliteOverlays:[]} selectedSatelliteId={satelliteOrbitMode?selectedSatelliteId:undefined} highlight={!satelliteMode&&point?highlight:null} onSatelliteClick={satelliteOrbitMode?setSelectedSatelliteId:undefined} initialView={shared.center||shared.zoom?{zoom:shared.zoom??1,rotation:shared.center?[-shared.center[0],-shared.center[1],0]:[-115,-12,0]}:undefined}/>
+  {!satelliteMode&&point&&displayedRun&&availableFields.length>0&&<PointForecast point={point} model={model} run={displayedRun} available={availableFields} province={province} onProvince={setProvince} onClose={()=>{setPoint(null);setProvince(null);}} onHighlight={setHighlight}/>}
 
   {!satelliteMode&&status&&<div role="status" className={`load-status ${error||syncError?'error':''}`}>{status}</div>}
   {satelliteObservationMode?<div className="satellite-modules"><SatelliteObservationPanel onTexture={setSatellite}/></div>:satelliteOrbitMode?<div className="satellite-modules"><SatelliteOrbitPanel satellites={satellites} selectedId={selectedSatelliteId} detail={satelliteDetail} onSelect={setSelectedSatelliteId} orbitAt={orbitAt} orbitCount={orbitCount} onOrbitAtChange={setOrbitAt} onOrbitCountChange={setOrbitCount}/></div>:<aside className="control-panel">
@@ -145,6 +161,8 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
    <div className="timeline-labels"><span>{formatTime(times[0])}</span><span>{formatTime(times[times.length-1])}</span></div>
    <div className="panel-divider"/><div className="forecast-readout"><strong>{time}</strong><span>北京时间</span></div>
    {grid&&<div className="wind-legend"><div style={{background:gradient}}/>{ticks.map((n,i)=><span key={n} style={{position:'absolute',left:`${i*25}%`,transform:i===0?undefined:i===4?'translateX(-100%)':'translateX(-50%)'}}>{n}{i===4?` ${spec.unit}`:''}</span>)}</div>}
+   <div className="share-row"><button className="choice" onClick={()=>void copyLink()}>复制分享链接</button>{shareNote&&<span role="status">{shareNote}</span>}</div>
+   {manualLink&&<input className="share-manual" aria-label="分享链接" readOnly value={manualLink} autoFocus onFocus={e=>e.currentTarget.select()} onBlur={()=>setManualLink('')}/>}
 
  </aside>}<div className="data-credit">{satelliteObservationMode?'JMA · Himawari-9':satelliteOrbitMode?'CelesTrak 轨道参数':`Open-Meteo S3 · ${grid?.meta.dx ?? (model==='grapes'?0.125:0.25)}°`} / <a href="https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9" target="_blank" rel="noreferrer">{ESRI_CREDIT}</a> · <a href="https://docs.gmt-china.org/latest/dataset/CN-border/" target="_blank" rel="noreferrer">省界：GMT / 全国地理信息资源目录服务系统</a></div>
  </main></div>;
@@ -152,7 +170,8 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
 
 export default function App(){
  const getMode=()=>location.hash.startsWith('#news')?'news':location.hash==='#outlook'?'outlook':location.hash==='#station'?'station':location.hash==='#satellite'?'satellite':location.hash==='#observation'?'observation':'home';
- const [mode,setMode]=useState(getMode);
- useEffect(()=>{const changed=()=>setMode(getMode());addEventListener('hashchange',changed);return()=>removeEventListener('hashchange',changed);},[]);
- return <><header className="topbar"><span className="brand-name">晴川观象</span><nav aria-label="主导航">{[['home','首页'],['observation','葵花卫星'],['satellite','卫星轨迹'],['station','站点预测'],['outlook','新能源态势'],['news','资讯']].map(([id,title])=><button key={id} className={`nav-item ${mode===id?'nav-item-active':''}`} onClick={()=>{location.hash=id==='home'?'':id;setMode(id);}}>{title}</button>)}</nav></header>{mode==='news'?<NewsPage/>:mode==='outlook'?<PowerOutlook/>:mode==='station'?<StationForecast/>:<WeatherApp satelliteMode={mode==='satellite'?'orbit':mode==='observation'?'observation':false}/>}</>;
+ const [mode,setMode]=useState(getMode),[homeKey,setHomeKey]=useState(0);
+ // 页面自身用 replaceState 写分享链接，不触发 hashchange；收到的 #home? 变化来自粘贴或前进后退，重新挂载首页以读取链接。
+ useEffect(()=>{const changed=()=>{if(location.hash.startsWith('#home?'))setHomeKey(k=>k+1);setMode(getMode());};addEventListener('hashchange',changed);return()=>removeEventListener('hashchange',changed);},[]);
+ return <><header className="topbar"><span className="brand-name">晴川观象</span><nav aria-label="主导航">{[['home','首页'],['observation','葵花卫星'],['satellite','卫星轨迹'],['station','站点预测'],['outlook','新能源态势'],['news','资讯']].map(([id,title])=><button key={id} className={`nav-item ${mode===id?'nav-item-active':''}`} onClick={()=>{location.hash=id==='home'?'':id;setMode(id);}}>{title}</button>)}</nav></header>{mode==='news'?<NewsPage/>:mode==='outlook'?<PowerOutlook/>:mode==='station'?<StationForecast/>:<WeatherApp key={homeKey} satelliteMode={mode==='satellite'?'orbit':mode==='observation'?'observation':false}/>}</>;
 }
