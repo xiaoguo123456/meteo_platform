@@ -6,6 +6,8 @@ type Forecast={level:string;run_time:string;points:Point[];grid_longitude?:numbe
 type Province={code:string;name:string};
 export type ProvinceOutline={type:'Feature';properties:Province;geometry:unknown};
 const time=(s:string)=>new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',hour12:false}).format(new Date(s));
+// 直辖市称"全市"，自治区、特别行政区称"全区"，其余称"全省"。
+const scopeLabel=(name:string)=>name.endsWith('市')?'全市平均':name.endsWith('区')?'全区平均':'全省平均';
 const read=async(url:string,signal?:AbortSignal)=>{const r=await fetch(url,{signal});const body=await r.json();if(!r.ok)throw new Error(body.detail||'读取失败');return body;};
 // 省份目录和轮廓不随批次变化，整个页面共用一份。
 let provinceList:Promise<Province[]>|null=null;const outlines=new Map<string,Promise<ProvinceOutline>>();
@@ -36,6 +38,7 @@ export default function PointForecast({point,model,run,available,province:select
   return()=>{abort.abort();clearTimeout(timer);};
  },[url,retry]);
  const spec=fields[field];if(!spec)return null;
+ const provinceName=data?.name||provinces.find(p=>p.code===province)?.name||'';
  const finite=data?.points.flatMap(p=>[p.value,p.min,p.max]).filter((v):v is number=>v!=null)??[],lo=finite.length?Math.min(...finite):0,hi=finite.length?Math.max(...finite):1;
  const start=data?Date.parse(data.points[0].time):0,end=data?Date.parse(data.points[data.points.length-1].time):1;
  const x=(t:string)=>45+450*(Date.parse(t)-start)/Math.max(1,end-start),y=(v:number)=>140-110*(v-lo)/Math.max(1,hi-lo);
@@ -46,7 +49,7 @@ export default function PointForecast({point,model,run,available,province:select
  const selected=hover!==null?data?.points[hover]:null;
  const value=(v:number|null|undefined)=>v==null?'缺测':`${v.toFixed(field==='precipitation'?2:1)} ${spec.unit}`;
  return <aside className="point-panel" role="dialog" aria-label={province?'省平均预报':'单点预报'}>
-  <div className="point-heading"><strong>{province?`${data?.name||provinces.find(p=>p.code===province)?.name||''} · 全省平均`:`${point[0].toFixed(3)}°E / ${point[1].toFixed(3)}°N`}</strong><button aria-label="关闭预报面板" onClick={onClose}>×</button></div>
+  <div className="point-heading"><strong>{province?`${provinceName} · ${scopeLabel(provinceName)}`:`${point[0].toFixed(3)}°E / ${point[1].toFixed(3)}°N`}</strong><button aria-label="关闭预报面板" onClick={onClose}>×</button></div>
   {(located||province)&&<div className="point-scope"><div className="choice-row"><button className={`choice ${!province?'active':''}`} aria-pressed={!province} onClick={()=>onProvince(null)}>单点</button><button className={`choice ${province?'active':''}`} aria-pressed={!!province} onClick={()=>{if(located)onProvince(located.code);}}>{province?'省平均':`${located?.name}平均`}</button></div>
    {province&&provinces.length>0&&<select aria-label="选择省份" value={province} onChange={e=>onProvince(e.target.value)}>{provinces.map(p=><option key={p.code} value={p.code}>{p.name}</option>)}</select>}</div>}
   <div className="point-fields"><div className="choice-row">{available.map(id=><button key={id} className={`choice ${id===field?'active':''}`} onClick={()=>setField(id)}>{fields[id].label}</button>)}</div><button className={`choice compare-toggle ${compare?'active':''}`} aria-pressed={compare} onClick={()=>onCompare(!compare)}>四模型对比</button></div>
