@@ -26,7 +26,7 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
  // 分享链接只在打开页面时读取一次；之后页面状态实时写回地址栏。
  const shared=useRef(parseShare(location.hash,Object.keys(fields))).current;
  const pendingTime=useRef(shared.time),[shareNote,setShareNote]=useState(''),[manualLink,setManualLink]=useState('');
- const [point,setPoint]=useState<[number,number]|null>(shared.point??null),[highlight,setHighlight]=useState<ProvinceOutline|null>(null),[province,setProvince]=useState<string|null>(shared.province??null);
+ const [point,setPoint]=useState<[number,number]|null>(shared.point??null),[highlight,setHighlight]=useState<ProvinceOutline|null>(null),[province,setProvince]=useState<string|null>(shared.province??null),[compare,setCompare]=useState(!!shared.compare);
  const [model,setModel]=useState(shared.model??'gfs'),[grid,setGrid]=useState<Grid|null>(null),[field,setField]=useState(shared.field??'wind'),[loading,setLoading]=useState(true),[error,setError]=useState('');
  const [viewport,setViewport]=useState<Viewport|null>(null),[waiting,setWaiting]=useState(false);
  const [batch,setBatch]=useState<Batch|null>(null),[index,setIndex]=useState(0),[playing,setPlaying]=useState(false),[syncError,setSyncError]=useState('');
@@ -74,9 +74,9 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
   const {index:next,exact}=nearestTime(times,pendingTime.current);pendingTime.current=undefined;setIndex(next);
   if(!exact){setShareNote('分享的时刻已不在当前预报中，已切到最近时刻');setTimeout(()=>setShareNote(''),6000);}
  },[times.join(','),availableFields.join(','),field]);
- const shareHash=()=>buildShare({model,field,time:valid,center:viewport?[-viewport.rotation[0],-viewport.rotation[1]]:undefined,zoom:viewport?viewport.radius/(Math.min(viewport.width,viewport.height)*.46):undefined,point:point??undefined,province:point?province??undefined:undefined});
+ const shareHash=()=>buildShare({model,field,time:valid,center:viewport?[-viewport.rotation[0],-viewport.rotation[1]]:undefined,zoom:viewport?viewport.radius/(Math.min(viewport.width,viewport.height)*.46):undefined,point:point??undefined,province:point?province??undefined:undefined,compare:!!point&&compare});
  // 替换而非新增历史记录，拖动时间轴不会塞满浏览器后退列表；等链接里的时刻恢复后才开始写。
- useEffect(()=>{if(satelliteMode||pendingTime.current)return;const timer=setTimeout(()=>history.replaceState(null,'',shareHash()),400);return()=>clearTimeout(timer);},[satelliteMode,model,field,valid,viewport,point,province]);
+ useEffect(()=>{if(satelliteMode||pendingTime.current)return;const timer=setTimeout(()=>history.replaceState(null,'',shareHash()),400);return()=>clearTimeout(timer);},[satelliteMode,model,field,valid,viewport,point,province,compare]);
  // 剪贴板接口被拒时退回旧式复制；仍失败则把链接选中显示，由用户手动复制。
  const copyLink=async()=>{const url=`${location.origin}${location.pathname}${shareHash()}`;let copied=false;
   try{await navigator.clipboard.writeText(url);copied=true;}catch{const area=document.createElement('textarea');area.value=url;area.style.position='fixed';area.style.opacity='0';document.body.appendChild(area);area.select();try{copied=document.execCommand('copy');}catch{}area.remove();}
@@ -149,7 +149,7 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
 
  return <div className="app-shell"><main className="weather-workspace">
   <WeatherGlobe onPoint={p=>{if(!satelliteMode)setPoint(p);}} satellite={satelliteObservationMode?satellite:null} onViewChange={setViewport} grid={satelliteMode?null:grid} animated={!satelliteMode&&grid?.meta.field==='wind'} satellites={satelliteOrbitMode?satelliteOverlays:[]} selectedSatelliteId={satelliteOrbitMode?selectedSatelliteId:undefined} highlight={!satelliteMode&&point?highlight:null} onSatelliteClick={satelliteOrbitMode?setSelectedSatelliteId:undefined} initialView={shared.center||shared.zoom?{zoom:shared.zoom??1,rotation:shared.center?[-shared.center[0],-shared.center[1],0]:[-115,-12,0]}:undefined}/>
-  {!satelliteMode&&point&&displayedRun&&availableFields.length>0&&<PointForecast point={point} model={model} run={displayedRun} available={availableFields} province={province} onProvince={setProvince} onClose={()=>{setPoint(null);setProvince(null);}} onHighlight={setHighlight}/>}
+  {!satelliteMode&&point&&displayedRun&&availableFields.length>0&&<PointForecast point={point} model={model} run={displayedRun} available={availableFields} province={province} onProvince={setProvince} compare={compare} onCompare={setCompare} onClose={()=>{setPoint(null);setProvince(null);setCompare(false);}} onHighlight={setHighlight}/>}
 
   {!satelliteMode&&status&&<div role="status" className={`load-status ${error||syncError?'error':''}`}>{status}</div>}
   {satelliteObservationMode?<div className="satellite-modules"><SatelliteObservationPanel onTexture={setSatellite}/></div>:satelliteOrbitMode?<div className="satellite-modules"><SatelliteOrbitPanel satellites={satellites} selectedId={selectedSatelliteId} detail={satelliteDetail} onSelect={setSelectedSatelliteId} orbitAt={orbitAt} orbitCount={orbitCount} onOrbitAtChange={setOrbitAt} onOrbitCountChange={setOrbitCount}/></div>:<aside className="control-panel">

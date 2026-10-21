@@ -1,5 +1,6 @@
 import {useEffect,useRef,useState} from 'react';
 import {fields} from './windMath';
+import ModelCompare from './ModelCompare';
 type Point={time:string;value:number|null;min?:number|null;max?:number|null;direction?:number|null};
 type Forecast={level:string;run_time:string;points:Point[];grid_longitude?:number;grid_latitude?:number;name?:string;cells?:number;nearest?:boolean;resolution?:number};
 type Province={code:string;name:string};
@@ -10,7 +11,7 @@ const read=async(url:string,signal?:AbortSignal)=>{const r=await fetch(url,{sign
 let provinceList:Promise<Province[]>|null=null;const outlines=new Map<string,Promise<ProvinceOutline>>();
 const listProvinces=()=>{provinceList??=read('/api/provinces').catch(e=>{provinceList=null;throw e;});return provinceList;};
 const outline=(code:string)=>{let p=outlines.get(code);if(!p){p=read(`/api/provinces/${code}/outline`);outlines.set(code,p);p.catch(()=>outlines.delete(code));}return p;};
-export default function PointForecast({point,model,run,available,province:selectedProvince,onProvince,onClose,onHighlight}:{point:[number,number];model:string;run:string;available:string[];province:string|null;onProvince:(code:string|null)=>void;onClose:()=>void;onHighlight:(outline:ProvinceOutline|null)=>void}){
+export default function PointForecast({point,model,run,available,province:selectedProvince,onProvince,compare,onCompare,onClose,onHighlight}:{point:[number,number];model:string;run:string;available:string[];province:string|null;onProvince:(code:string|null)=>void;compare:boolean;onCompare:(value:boolean)=>void;onClose:()=>void;onHighlight:(outline:ProvinceOutline|null)=>void}){
  const [field,setField]=useState(available.includes('temperature')?'temperature':available[0]),[loaded,setLoaded]=useState<{url:string;data:Forecast}|null>(null),[failure,setFailure]=useState<{url:string;message:string}|null>(null),[hover,setHover]=useState<number|null>(null);
  const [located,setLocated]=useState<Province|null>(null),[provinces,setProvinces]=useState<Province[]>([]),[retry,setRetry]=useState(0);
  // 省份选择由上层持有，便于写入分享链接；首次定位不覆盖链接里恢复的省份。
@@ -48,9 +49,9 @@ export default function PointForecast({point,model,run,available,province:select
   <div className="point-heading"><strong>{province?`${data?.name||provinces.find(p=>p.code===province)?.name||''} · 全省平均`:`${point[0].toFixed(3)}°E / ${point[1].toFixed(3)}°N`}</strong><button aria-label="关闭预报面板" onClick={onClose}>×</button></div>
   {(located||province)&&<div className="point-scope"><div className="choice-row"><button className={`choice ${!province?'active':''}`} aria-pressed={!province} onClick={()=>onProvince(null)}>单点</button><button className={`choice ${province?'active':''}`} aria-pressed={!!province} onClick={()=>{if(located)onProvince(located.code);}}>{province?'省平均':`${located?.name}平均`}</button></div>
    {province&&provinces.length>0&&<select aria-label="选择省份" value={province} onChange={e=>onProvince(e.target.value)}>{provinces.map(p=><option key={p.code} value={p.code}>{p.name}</option>)}</select>}</div>}
-  <div className="choice-row">{available.map(id=><button key={id} className={`choice ${id===field?'active':''}`} onClick={()=>setField(id)}>{fields[id].label}</button>)}</div>
-  <div className="run-readout">{model.toUpperCase()} · 起报 {time(run)} · 北京时间</div>
-  {error?<p role={error.includes('正在后台计算')?'status':'alert'}>{error}</p>:!data?<p role="status">{province?'正在读取省平均预报…':'正在读取单点预报…'}</p>:<>
+  <div className="point-fields"><div className="choice-row">{available.map(id=><button key={id} className={`choice ${id===field?'active':''}`} onClick={()=>setField(id)}>{fields[id].label}</button>)}</div><button className={`choice compare-toggle ${compare?'active':''}`} aria-pressed={compare} onClick={()=>onCompare(!compare)}>四模型对比</button></div>
+  <div className="run-readout">{compare?'GFS · GRAPES · IFS · AIFS 各取最新起报 · 北京时间':`${model.toUpperCase()} · 起报 ${time(run)} · 北京时间`}</div>
+  {compare?<ModelCompare point={point} province={province} field={field}/>:error?<p role={error.includes('正在后台计算')?'status':'alert'}>{error}</p>:!data?<p role="status">{province?'正在读取省平均预报…':'正在读取单点预报…'}</p>:<>
    <div className="run-readout">{province?`${data.level} · ${data.nearest?'面积小于网格，取最近格点':`面积加权平均 · ${data.cells} 个格点（${data.resolution}°）`}`:`${data.level} · 最近网格 ${data.grid_longitude!.toFixed(3)}°, ${data.grid_latitude!.toFixed(3)}°`}</div>
    <svg viewBox="0 0 520 180" role="img" aria-label={`${spec.label}${province?'省平均':''}预报折线图`} onPointerMove={e=>{const rect=e.currentTarget.getBoundingClientRect(),t=start+((e.clientX-rect.left)/rect.width*520-45)/450*(end-start);let nearest=0;data.points.forEach((p,i)=>{if(Math.abs(Date.parse(p.time)-t)<Math.abs(Date.parse(data.points[nearest].time)-t))nearest=i;});setHover(nearest);}}>
     {[lo,(lo+hi)/2,hi].map((v,i)=><g key={i}><path d={`M45 ${y(v)}H495`} stroke="#dbe4e5"/><text x="1" y={y(v)+4} fontSize="11" fill="#52686c">{v.toFixed(1)}</text></g>)}

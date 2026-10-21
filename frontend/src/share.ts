@@ -1,4 +1,4 @@
-// 首页分享链接：#home?m=模型&f=要素&t=预报时刻&r=视野中心经,纬&z=缩放&p=点击经,纬&s=省份代码。
+// 首页分享链接：#home?m=模型&f=要素&t=预报时刻&r=视野中心经,纬&z=缩放&p=点击经,纬&s=省份代码&c=1（四模型对比）。
 // 只记预报时刻、不记起报批次：批次只保留两份，过期链接按最近时刻打开。
 export type ShareState={model?:string;field?:string;time?:string;center?:[number,number];zoom?:number;point?:[number,number];province?:string;compare?:boolean};
 export const MODELS=['gfs','grapes','ifs','aifs'];
