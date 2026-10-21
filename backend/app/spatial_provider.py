@@ -27,6 +27,16 @@ MODEL_GRIDS = {
 MODEL_GRIDS["grapes"] = dict(width=2880, height=1440, lon0=-180, lat0=-89.9375, dx=0.125, dy=0.125)
 
 
+# 首页可展示的气象要素，顺序即界面顺序。
+FIELDS = ("wind", "temperature", "humidity", "pressure", "precipitation", "cloud")
+
+
+def model_fields(model_id):
+    """该模型实际提供的要素：风必有，其余以变量映射为准。"""
+    names = MODEL_VARIABLE_NAMES[model_id]
+    return tuple(field for field in FIELDS if field == "wind" or names.get(field))
+
+
 class SpatialDataError(RuntimeError):
     """S3 空间数据无法读取。"""
 
@@ -38,7 +48,8 @@ MODEL_VARIABLE_NAMES = {
         "humidity": "relative_humidity_1000hPa",
         "pressure": "pressure_msl",
         "precipitation": None,
-        "cloud": "cloud_cover_1000hPa",
+        # GFS 空间数据只有 1000hPa 层云量，不是总云量，与其他模型对比会误导，不提供。
+        "cloud": None,
     },
     "ifs": {
         "u": "wind_u_component_10m",

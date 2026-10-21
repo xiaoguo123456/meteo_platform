@@ -4,12 +4,11 @@ import math
 from functools import lru_cache
 from pathlib import Path
 import numpy as np
-from .spatial_provider import MODEL_GRIDS, SpatialDataError
+from .spatial_provider import MODEL_GRIDS, SpatialDataError, model_fields
 
 REGIONS_PATH = Path(__file__).parent/'data/province_regions.json'
 # 每个格点 4×4 子采样估算落在省内的面积比例，边界格点按比例计入。
 SUBSAMPLE = 4
-FIELDS = ('wind', 'temperature', 'humidity', 'pressure', 'precipitation')
 
 
 @lru_cache(maxsize=1)
@@ -94,7 +93,7 @@ def frame_stats(model, arrays):
         flat['wind'] = np.hypot(flat['u'], flat['v'])
     for code, item in weights(model).items():
         stats = {}
-        for field in FIELDS:
+        for field in model_fields(model):
             if field not in flat:
                 continue
             values = flat[field][item['index']]
@@ -137,7 +136,7 @@ def _series(root, model, key, field, indices):
 def province_forecast(model, field, code, run=None):
     from .forecast_cache import ROOT, read_run_status
     from .wind_grid import field_spec
-    if model not in MODEL_GRIDS or field not in FIELDS:
+    if model not in MODEL_GRIDS or field not in model_fields(model):
         raise ValueError('模型或气象要素无效')
     if code not in regions():
         raise ValueError('省份代码无效')

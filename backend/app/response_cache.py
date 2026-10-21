@@ -6,10 +6,12 @@ import threading
 from pathlib import Path
 import numpy as np
 from .wind_grid import encode_grid
+from .spatial_provider import FIELDS, model_fields
 
 LOCKS = [threading.Lock() for _ in range(64)]
 PREPARE = threading.Semaphore(1)
-FIELDS = ('wind', 'temperature', 'humidity', 'pressure', 'precipitation')
+# 浏览器数据块齐备标记；新增要素时升级版本，旧批次据此从本地 NPZ 补生成。
+WIRE_MARKER = 'wire-v5'
 
 
 def pack_grid(native, model, field):
@@ -64,8 +66,8 @@ def prepare_field(folder, index, model, field, native_factory):
 def prepare_snapshot(folder, index, model, native):
     # 压缩为 CPU 工作，只开一路，给 API 和下载保留资源。
     with PREPARE:
-        for field in FIELDS:
+        for field in model_fields(model):
             if field == 'wind' or field in native['arrays'] and np.isfinite(native['arrays'][field]).any():
                 from .tile_cache import prepare_tiles
                 prepare_tiles(folder, index, model, field, native)
-        (folder / f'{index}.wire-v4').touch()
+        (folder / f'{index}.{WIRE_MARKER}').touch()

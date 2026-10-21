@@ -15,7 +15,7 @@ def field_spec(model, field):
     """要素单位与层次，空间帧和省平均共用。"""
     level = "1000hPa" if model == "gfs" else "2m"
     specs = {"wind": ("m/s", "80m" if model == "gfs" else "10m"), "temperature": ("°C", level), "pressure": ("hPa", "海平面"),
-             "humidity": ("%", level), "precipitation": ("mm", "地面 · 时段降水")}
+             "humidity": ("%", level), "precipitation": ("mm", "地面 · 时段降水"), "cloud": ("%", "总云量")}
     if field not in specs:
         raise SpatialDataError("不支持的气象要素")
     return specs[field]
@@ -40,7 +40,7 @@ def encode_grid(native, model, field="wind"):
     meta['run_time'] = native.get('run_time')
     if field != 'wind':
         if field not in native['arrays']:
-            raise SpatialDataError('当前 S3 模型文件未提供' + {'temperature':'温度','humidity':'湿度','pressure':'气压','precipitation':'降水'}[field] + '数据')
+            raise SpatialDataError('当前 S3 模型文件未提供' + {'temperature':'温度','humidity':'湿度','pressure':'气压','precipitation':'降水','cloud':'云量'}[field] + '数据')
         u = native['arrays'][field]
         if u.shape != shape or not np.isfinite(u).any():
             raise SpatialDataError('气象要素网格不完整')

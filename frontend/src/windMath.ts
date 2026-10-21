@@ -25,7 +25,9 @@ export const fields:Record<string,{label:string; min:number; max:number; unit:st
  temperature:{label:'温度',min:-40,max:40,unit:'°C',colors:[[-40,75,54,160],[-20,53,130,204],[0,172,222,218],[20,248,207,103],[40,191,49,54]]},
  pressure:{label:'气压',min:960,max:1040,unit:'hPa',colors:[[960,81,63,163],[980,56,140,197],[1000,159,216,200],[1020,246,212,121],[1040,199,74,49]]},
  humidity:{label:'湿度',min:0,max:100,unit:'%',colors:[[0,231,217,177],[25,201,218,178],[50,111,191,166],[75,44,143,160],[100,46,68,135]]},
- precipitation:{label:'降水',min:0,max:50,unit:'mm',colors:[[0,232,240,239],[1,143,214,198],[5,62,169,177],[10,65,112,186],[25,123,66,166],[50,182,47,93]]}
+ precipitation:{label:'降水',min:0,max:50,unit:'mm',colors:[[0,232,240,239],[1,143,214,198],[5,62,169,177],[10,65,112,186],[25,123,66,166],[50,182,47,93]]},
+ // 晴空偏深、阴天趋白，接近卫星云图观感。
+ cloud:{label:'云量',min:0,max:100,unit:'%',colors:[[0,31,58,82],[30,86,116,138],[60,164,181,193],[85,222,229,233],[100,248,250,251]]}
 };
 export function fieldColor(field:string,value:number){
  const colors=fields[field].colors;

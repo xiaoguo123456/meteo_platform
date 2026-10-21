@@ -158,7 +158,7 @@ class MultiModelTests(ForecastCacheFixture):
                 with lock:
                     running -= 1
         def prepare(folder,index,*args):
-            (folder/f'{index}.wire-v4').touch()
+            (folder/f'{index}.{cache.WIRE_MARKER}').touch()
         def stats(folder,index,*args):
             (folder/f'{index}.provinces.json').touch()
         with patch.object(cache, 'CONCURRENCY', 4), patch.object(cache, 'latest_manifest', return_value=self.manifest), patch.object(cache, 'read_native_snapshot', side_effect=download), patch.object(cache, 'encode_grid'), patch.object(cache, 'prepare_snapshot',side_effect=prepare), patch.object(cache, 'write_frame_stats',side_effect=stats):
@@ -179,7 +179,7 @@ class MultiModelTests(ForecastCacheFixture):
         (folder/'0.npz').touch();cache.publish(context)
         self.assertEqual(cache.read_status('ifs')['times'],[])
         # NPZ 已写入也要等分块响应完成，避免交互请求触发压缩。
-        (folder/'0.wire-v4').touch();cache.publish(context)
+        (folder/f'0.{cache.WIRE_MARKER}').touch();cache.publish(context)
         self.assertEqual(context['status']['times'], self.manifest['valid_times'])
         self.assertEqual(cache.read_status('ifs')['times'],self.manifest['valid_times'])
 
@@ -198,3 +198,38 @@ class FieldTimelineTests(ForecastCacheFixture):
         payload=cache.cached_field('ifs','precipitation',valid_time=self.manifest['valid_times'][1])
         size=int.from_bytes(payload[:4],'little')
         self.assertEqual(json.loads(payload[4:4+size])['interval_start'],self.manifest['valid_times'][0])
+
+class CloudFieldTests(ForecastCacheFixture):
+    def cloudy(self,model,manifest,time,*args):
+        result=self.native(model,manifest,time,*args)
+        result['arrays']['cloud']=np.full((721,1440),manifest['valid_times'].index(time)*40+10,dtype=np.float32)
+        return result
+
+    def test_gfs_hides_cloud_others_provide(self):
+        from app.spatial_provider import model_fields
+        self.assertNotIn('cloud',model_fields('gfs'))
+        self.assertNotIn('precipitation',model_fields('gfs'))
+        for model in ('ifs','aifs','grapes'):self.assertIn('cloud',model_fields(model))
+        with self.assertRaisesRegex(SpatialDataError,'未提供'):cache.locate_field('gfs','cloud')
+
+    def test_cloud_published_and_old_frames_backfilled_without_download(self):
+        from app.tile_cache import cached_tiles
+        with patch.object(cache,'latest_manifest',return_value=self.manifest),patch.object(cache,'read_native_snapshot',side_effect=self.cloudy):
+            cache.sync_once(['ifs'])
+        status=cache.read_status('ifs');folder=cache.ROOT/'ifs'/status['key']
+        self.assertEqual(status['field_times']['cloud'],self.manifest['valid_times'])
+        self.assertEqual(status['field_times']['wind'],self.manifest['valid_times'])
+        # 模拟升级前的批次：只有旧标记、没有云量数据块。
+        for i in range(2):
+            (folder/f'{i}.{cache.WIRE_MARKER}').unlink();(folder/f'{i}.wire-v4').touch()
+            for path in folder.glob(f'{i}.cloud.*'):path.unlink()
+        with patch.object(cache,'latest_manifest',return_value=self.manifest),patch.object(cache,'read_native_snapshot',side_effect=AssertionError('不应重新下载')):
+            cache.sync_once(['ifs'])
+        self.assertEqual(cache.read_status('ifs')['state'],'ready')
+        self.assertTrue((folder/'1.cloud.v4.blocks').exists())
+        stream,length=cached_tiles('ifs','cloud',status['run_time'],self.manifest['valid_times'][1],[0],4)
+        self.assertEqual(len(b''.join(stream)),length)
+        from app.province_stats import province_forecast
+        series=province_forecast('ifs','cloud','110000',status['run_time'])
+        self.assertEqual([p['mean'] for p in series['points']],[10,50])
+        self.assertEqual(series['unit'],'%')

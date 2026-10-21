@@ -12,13 +12,13 @@ from collections import deque
 from pathlib import Path
 from datetime import datetime, timezone
 import numpy as np
-from .spatial_provider import latest_manifest, read_native_snapshot, SpatialDataError, MODEL_SPATIAL_NAMES
+from .spatial_provider import latest_manifest, read_native_snapshot, SpatialDataError, MODEL_SPATIAL_NAMES, model_fields
 from .wind_grid import encode_grid
-from .response_cache import prepare_snapshot, prepare_field
+from .response_cache import prepare_snapshot, prepare_field, WIRE_MARKER
 from .province_stats import write_frame_stats
 
 # 一帧完成需要的全部文件：原始数据、浏览器数据块、省平均统计。
-FRAME_FILES = ('npz', 'wire-v4', 'provinces.json')
+FRAME_FILES = ('npz', WIRE_MARKER, 'provinces.json')
 ROOT = Path(os.getenv('WEATHER_FORECAST_CACHE', str(Path(__file__).resolve().parents[2] / 'data/cache/forecasts')))
 STOP = threading.Event()
 CONCURRENCY = max(1, min(4, int(os.getenv("WEATHER_DOWNLOAD_CONCURRENCY", "4"))))
@@ -107,7 +107,7 @@ def publish(context):
             break
         available.append(valid)
     status['times'] = available
-    field_times = {field: [] for field in ('wind', 'temperature', 'humidity', 'pressure', 'precipitation')}
+    field_times = {field: [] for field in model_fields(status['model'])}
     for i, valid in enumerate(available):
         metadata = folder / f'{i}.json'
         fields = json.loads(metadata.read_text()) if metadata.exists() else ('wind', 'temperature', 'humidity', 'pressure')
@@ -247,6 +247,8 @@ async def sync_loop():
 
 
 def locate_field(model, field, run_time=None, valid_time=None):
+    if model in MODEL_SPATIAL_NAMES and field not in model_fields(model):
+        raise SpatialDataError('当前模型未提供该气象要素')
     status = read_run_status(model, run_time)
     if not status['times']:
         raise SpatialDataError(status.get('error') or '最新起报数据正在提前缓存，请稍后重试')
