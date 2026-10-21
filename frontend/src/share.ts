@@ -1,6 +1,6 @@
-// 首页分享链接：#home?m=模型&f=要素&t=预报时刻&r=视野中心经,纬&z=缩放&p=点击经,纬&s=省份代码&c=1（四模型对比）。
+// 首页分享链接：#home?m=模型&f=要素&t=预报时刻&r=视野中心经,纬&z=缩放&p=点击经,纬&s=省份代码&c=1（四模型对比）&v=p（按省填色）。
 // 只记预报时刻、不记起报批次：批次只保留两份，过期链接按最近时刻打开。
-export type ShareState={model?:string;field?:string;time?:string;center?:[number,number];zoom?:number;point?:[number,number];province?:string;compare?:boolean};
+export type ShareState={model?:string;field?:string;time?:string;center?:[number,number];zoom?:number;point?:[number,number];province?:string;compare?:boolean;byProvince?:boolean};
 export const MODELS=['gfs','grapes','ifs','aifs'];
 const pair=(value:string|null,lonLimit:number,latLimit:number):[number,number]|undefined=>{
  const parts=value?.split(',').map(Number);
@@ -19,6 +19,7 @@ export function parseShare(hash:string,fieldIds:string[]):ShareState{
  state.point=pair(q.get('p'),180,90);
  if(province&&/^\d{6}$/.test(province)&&state.point)state.province=province;
  if(q.get('c')==='1'&&state.point)state.compare=true;
+ if(q.get('v')==='p')state.byProvince=true;
  return state;
 }
 export function buildShare(state:ShareState):string{
@@ -28,6 +29,7 @@ export function buildShare(state:ShareState):string{
  if(state.time)q.set('t',state.time);
  if(state.center)q.set('r',state.center.map(v=>v.toFixed(2)).join(','));
  if(state.zoom!=null)q.set('z',state.zoom.toFixed(2));
+ if(state.byProvince)q.set('v','p');
  if(state.point){q.set('p',state.point.map(v=>v.toFixed(3)).join(','));if(state.province)q.set('s',state.province);if(state.compare)q.set('c','1');}
  return `#home?${q.toString().replace(/%2C/g,',').replace(/%3A/g,':')}`;
 }

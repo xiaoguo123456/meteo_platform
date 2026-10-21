@@ -7,6 +7,8 @@ import numpy as np
 from .spatial_provider import MODEL_GRIDS, SpatialDataError, model_fields
 
 REGIONS_PATH = Path(__file__).parent/'data/province_regions.json'
+# 首页按省填色用的显示精度省域（0.01 度简化），统计仍用 REGIONS_PATH 的精细面。
+SHAPES_PATH = Path(__file__).parent/'data/province_shapes.json'
 # 每个格点 4×4 子采样估算落在省内的面积比例，边界格点按比例计入。
 SUBSAMPLE = 4
 
@@ -131,6 +133,45 @@ def _series(root, model, key, field, indices):
             if entry:
                 values[i, j] = entry
     return {code: j for j, code in enumerate(codes)}, values
+
+
+def label_point(code):
+    """省内一个落在省域里的点，供排行点击打开省平均：按面积占比从大到小找中心在省内的格点，
+    0.25° 网格找不到（如香港格点中心多在海上）再用 0.125° 网格，仍没有则取省域中心。"""
+    for model in ('gfs', 'grapes'):
+        grid, item = MODEL_GRIDS[model], weights(model)[code]
+        for index in item['index'][np.argsort(-item['weight'])]:
+            longitude = grid['lon0']+int(index) % grid['width']*grid['dx']
+            latitude = grid['lat0']+int(index)//grid['width']*grid['dy']
+            if _inside(regions()[code]['edges'], np.array([longitude]), latitude)[0]:
+                return [round(float(longitude), 4), round(float(latitude), 4)]
+    return [round(float(v), 4) for v in regions()[code]['centre']]
+
+
+@lru_cache(maxsize=1)
+def shapes():
+    collection = json.loads(SHAPES_PATH.read_text())
+    for feature in collection['features']:
+        feature['properties']['label'] = label_point(feature['properties']['code'])
+    return collection
+
+
+def province_map(model, field, run, valid):
+    """某一预报时刻全部省份的 [平均, 最低, 最高]，用于按省填色和排行。"""
+    from .forecast_cache import ROOT, read_run_status
+    from .wind_grid import field_spec
+    if model not in MODEL_GRIDS or field not in model_fields(model):
+        raise ValueError('模型或气象要素无效')
+    status = read_run_status(model, run)
+    if valid not in status.get('field_times', {}).get(field, []):
+        raise SpatialDataError('该预报时刻尚未缓存完成')
+    path = ROOT/model/status['key']/f"{status['expected_times'].index(valid)}.provinces.json"
+    if not path.exists():
+        raise SpatialDataError('省平均正在后台计算，请稍后重试')
+    frame = json.loads(path.read_text())
+    unit, level = field_spec(model, field)
+    values = {code: frame[code][field][:3] for code in regions() if field in frame.get(code, {})}
+    return dict(model=model, field=field, run_time=status['run_time'], valid_time=valid, unit=unit, level=level, values=values)
 
 
 def province_forecast(model, field, code, run=None):

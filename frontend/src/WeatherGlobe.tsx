@@ -3,6 +3,8 @@ import { geoOrthographic, geoPath, geoGraticule10, geoRotation } from 'd3-geo';
 import type { Grid } from './windMath';
 import { loadEarthTexture, type EarthTexture } from './basemap';
 import type { Viewport } from './viewTiles';
+export type ProvinceShapes={type:'FeatureCollection';features:{type:'Feature';properties:{code:string;name:string;label:[number,number]};geometry:unknown}[]};
+export type ProvinceFill={shapes:ProvinceShapes;colors:Record<string,string>};
 
 export type SatelliteOverlay = {
  id:string;
@@ -13,12 +15,13 @@ export type SatelliteOverlay = {
  track?:{longitude:number;latitude:number}[];
 };
 
-export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satellite,satellites=[],selectedSatelliteId,onSatelliteClick,highlight=null,initialView}:{grid:Grid|null;satellite:EarthTexture|null;animated:boolean;onViewChange:(view:Viewport)=>void;onPoint:(point:[number,number])=>void;satellites?:SatelliteOverlay[];selectedSatelliteId?:string;onSatelliteClick?:(id:string)=>void;highlight?:unknown;initialView?:{zoom:number;rotation:[number,number,number]}}){
+export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satellite,satellites=[],selectedSatelliteId,onSatelliteClick,highlight=null,initialView,colorize=true,provinceFill=null}:{grid:Grid|null;satellite:EarthTexture|null;animated:boolean;onViewChange:(view:Viewport)=>void;onPoint:(point:[number,number])=>void;satellites?:SatelliteOverlay[];selectedSatelliteId?:string;onSatelliteClick?:(id:string)=>void;highlight?:unknown;initialView?:{zoom:number;rotation:[number,number,number]};colorize?:boolean;provinceFill?:ProvinceFill|null}){
  const pointCallback=useRef(onPoint);pointCallback.current=onPoint;
  const satelliteCallback=useRef(onSatelliteClick);satelliteCallback.current=onSatelliteClick;
  const satellitesRef=useRef<SatelliteOverlay[]>(satellites);satellitesRef.current=satellites;
  const selectedSatelliteRef=useRef(selectedSatelliteId);selectedSatelliteRef.current=selectedSatelliteId;
  const highlightRef=useRef(highlight);highlightRef.current=highlight;
+ const colorizeRef=useRef(colorize);const fillRef=useRef(provinceFill);fillRef.current=provinceFill;const redrawBase=useRef<()=>void>(()=>{});const updateColorize=useRef<(value:boolean)=>void>(()=>{});
  const redraw=useRef<()=>void>(()=>{});
  const [renderError,setRenderError]=useState('');
  const viewCallback=useRef(onViewChange);viewCallback.current=onViewChange;
@@ -73,6 +76,11 @@ export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satelli
     if(marker){mctx.beginPath();mctx.arc(marker[0],marker[1],5,0,Math.PI*2);mctx.fillStyle=selectedSatellite.color;mctx.fill();mctx.strokeStyle='rgba(255,255,255,.95)';mctx.lineWidth=1.5;mctx.stroke();}
    }
    mctx.beginPath();mctx.arc(width/2,height/2,radius,0,2*Math.PI);mctx.strokeStyle='#718c92';mctx.stroke();};
+  // 底图栅格与按省填色同画在底层，风粒子与边界线仍在上层可见。
+  const drawBase=()=>{if(!displayed||!raster.width)return;bctx.clearRect(0,0,width,height);bctx.save();bctx.beginPath();bctx.arc(width/2,height/2,displayed.radius,0,Math.PI*2);bctx.clip();bctx.imageSmoothingEnabled=true;bctx.filter=displayed.coarse?'blur(2px)':'none';bctx.drawImage(raster,0,0,width,height);bctx.filter='none';
+   const fill=fillRef.current;
+   if(fill){const path=geoPath(geoOrthographic().rotate(displayed.rotation).translate([width/2,height/2]).scale(displayed.radius).clipAngle(90),bctx);for(const feature of fill.shapes.features){const color=fill.colors[feature.properties.code];if(!color)continue;bctx.beginPath();path(feature as any);bctx.fillStyle=color;bctx.fill();}}
+   bctx.restore();};
   const submit=()=>{if(busy||!pending||disposed)return;busy=true;worker.postMessage(pending);pending=null;};
   let reported='';
   const report=()=>{const value={width,height,radius,rotation:[...rotation] as [number,number,number]},key=JSON.stringify(value);if(key!==reported){reported=key;viewCallback.current(value);}};
@@ -86,8 +94,7 @@ export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satelli
     vectors=data.id===version?data.vectors:null;
     raster.width=data.width;raster.height=data.height;raster.getContext('2d')!.putImageData(new ImageData(data.pixels,data.width,data.height),0,0);
     // 新画面和边界在同一帧提交；计算过程中不清空上一帧。
-    bctx.clearRect(0,0,width,height);bctx.save();bctx.beginPath();bctx.arc(width/2,height/2,data.radius,0,Math.PI*2);bctx.clip();bctx.imageSmoothingEnabled=true;bctx.filter=data.coarse?'blur(2px)':'none';bctx.drawImage(raster,0,0,width,height);bctx.restore();
-    displayed=data;drawMap();ctx.clearRect(0,0,width,height);
+    displayed=data;drawBase();drawMap();ctx.clearRect(0,0,width,height);
     if(!data.coarse&&data.id===version&&data.meta?.complete&&data.meta.requestedAt){
      const entry={model:data.meta.model,field:data.field,time:data.meta.valid_time,totalMs:Math.round(performance.now()-data.meta.requestedAt+(data.meta.waitMs||0)),waitMs:Math.round(data.meta.waitMs||0),buildMs:Math.round(data.elapsed)};
      if(samples[samples.length-1]?.time!==entry.time||samples[samples.length-1]?.field!==entry.field||samples[samples.length-1]?.model!==entry.model){samples.push(entry);if(samples.length>120)samples.shift();}
@@ -99,6 +106,8 @@ export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satelli
   };
   updateSatellite.current=value=>{generation++;worker.postMessage({satellite:value});request();};
   updateGrid.current=value=>{generation++;worker.postMessage({grid:value});request();};
+  updateColorize.current=value=>{generation++;worker.postMessage({colorize:value});request();};
+  redrawBase.current=drawBase;worker.postMessage({colorize:colorizeRef.current});
   const resize=()=>{
    const nextWidth=Math.max(1,Math.round(container.clientWidth)),nextHeight=Math.max(1,Math.round(container.clientHeight));
    if(nextWidth===width&&nextHeight===height)return;
@@ -128,11 +137,13 @@ export default function WeatherGlobe({grid,animated,onViewChange,onPoint,satelli
    measuredFrames++;measuredCost+=performance.now()-started;if(now-measureStart>=2000){container.dataset.fps=(measuredFrames*1000/(now-measureStart)).toFixed(1);container.dataset.frameCostMs=(measuredCost/measuredFrames).toFixed(2);measuredFrames=0;measuredCost=0;measureStart=now;}
   };frame=requestAnimationFrame(tick);
   redraw.current=drawMap;
-  return()=>{view.current={zoom,rotation};disposed=true;redraw.current=()=>{};clearTimeout(rebuildTimer);cancelAnimationFrame(frame);worker.terminate();observer.disconnect();container.removeEventListener('keydown',keydown);container.removeEventListener('pointerdown',down);container.removeEventListener('pointermove',move);container.removeEventListener('pointerup',up);container.removeEventListener('pointercancel',up);container.removeEventListener('wheel',wheel);};
+  return()=>{view.current={zoom,rotation};disposed=true;redraw.current=()=>{};redrawBase.current=()=>{};updateColorize.current=()=>{};clearTimeout(rebuildTimer);cancelAnimationFrame(frame);worker.terminate();observer.disconnect();container.removeEventListener('keydown',keydown);container.removeEventListener('pointerdown',down);container.removeEventListener('pointermove',move);container.removeEventListener('pointerup',up);container.removeEventListener('pointercancel',up);container.removeEventListener('wheel',wheel);};
  },[]);
  useEffect(()=>{updateGrid.current(grid);},[grid]);
  useEffect(()=>{updateSatellite.current(satellite);},[satellite]);
  useEffect(()=>{satellitesRef.current=satellites;selectedSatelliteRef.current=selectedSatelliteId;redraw.current();},[satellites,selectedSatelliteId]);
  useEffect(()=>{highlightRef.current=highlight;redraw.current();},[highlight]);
+ useEffect(()=>{fillRef.current=provinceFill;redrawBase.current();},[provinceFill]);
+ useEffect(()=>{colorizeRef.current=colorize;updateColorize.current(colorize);},[colorize]);
  return <div className="weather-globe" ref={host} tabIndex={0} aria-label="地球视图，方向键旋转，加减键缩放"><canvas ref={base}/><canvas ref={lines}/><canvas ref={map}/>{renderError&&<div role="alert" className="load-status error">{renderError}</div>}</div>;
 }

@@ -2,11 +2,14 @@ import { geoOrthographic } from 'd3-geo';
 import { sample, fieldColor, type Grid } from './windMath';
 import { textureColor, type EarthTexture } from './basemap';
 let grid:Grid|null=null,texture:EarthTexture|null=null,satellite:EarthTexture|null=null;
+// 按省填色时只画底图与风矢量，格点色块由省份填色代替。
+let colorize=true;
 let geometryKey='';
 let geometryCache:({ll:[number,number];px:number;py:number;base:number[];east?:[number,number]|null;north?:[number,number]|null}|undefined)[]=[];
 self.onmessage=({data})=>{
  if('satellite' in data){satellite=data.satellite;return;}
  if('grid' in data){grid=data.grid;return;}
+ if('colorize' in data){colorize=data.colorize;return;}
  if(data.texture){texture=data.texture;geometryKey='';return;}
  const started=performance.now();
  const {id,generation,width,height,rotation,radius,coarse}=data;
@@ -42,7 +45,7 @@ self.onmessage=({data})=>{
    const field=grid.meta.field||'wind';
    const tint=fieldColor(field,field==='wind'?s:u);
    const opacity=texture?.pixels?(field==='wind'?.72:.66):1;
-   color=color.map((base,i)=>Math.round(base*(1-opacity)+tint[i]*opacity));
+   if(colorize)color=color.map((base,i)=>Math.round(base*(1-opacity)+tint[i]*opacity));
    if(vectors){
     const cos=Math.max(.02,Math.cos(ll[1]*Math.PI/180)),step=.001;
     const east=point.east??(point.east=projection([ll[0]+step,ll[1]])),north=point.north??(point.north=projection([ll[0],ll[1]+step]));

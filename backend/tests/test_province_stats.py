@@ -81,6 +81,20 @@ class RealRegionTests(unittest.TestCase):
         self.assertIsNone(ps.locate(139.7, 35.7))
 
 
+class ProvinceShapeTests(unittest.TestCase):
+    def test_label_points_inside_and_shapes_light(self):
+        ps.regions.cache_clear(); ps.weights.cache_clear(); ps.shapes.cache_clear()
+        collection = ps.shapes()
+        self.assertEqual(len(collection['features']), 34)
+        for feature in collection['features']:
+            code = feature['properties']['code']
+            located = ps.locate(*feature['properties']['label'])
+            # 澳门比格点还小，取最近格点，标签点可能落在省外；其余省份必须落在本省内。
+            if not ps.weights('gfs')[code]['nearest']:
+                self.assertEqual(located and located['code'], code, feature['properties']['name'])
+        self.assertLess(ps.SHAPES_PATH.stat().st_size, 1_000_000)
+
+
 class ProvinceForecastTests(ForecastCacheFixture):
     def test_series_backfill_and_api(self):
         with patch.object(cache, 'latest_manifest', return_value=self.manifest), patch.object(cache, 'read_native_snapshot', side_effect=self.native):
@@ -116,3 +130,13 @@ class ProvinceForecastTests(ForecastCacheFixture):
         self.assertEqual(outline.json()['geometry']['type'], 'MultiPolygon')
         self.assertEqual(client.get('/api/provinces/999999/outline').status_code, 404)
         self.assertEqual(len(client.get('/api/provinces').json()), 34)
+
+        valid = self.manifest['valid_times'][1]
+        snapshot = client.get('/api/province-map/gfs', params={'field': 'wind', 'run_time': run, 'valid_time': valid}).json()
+        self.assertEqual(len(snapshot['values']), 34)
+        self.assertAlmostEqual(snapshot['values']['110000'][0], series['points'][1]['mean'], places=3)
+        self.assertEqual(snapshot['unit'], 'm/s')
+        self.assertEqual(client.get('/api/province-map/gfs', params={'field': 'cloud', 'run_time': run, 'valid_time': valid}).status_code, 503)
+        self.assertEqual(client.get('/api/province-map/gfs', params={'field': 'wind', 'run_time': run, 'valid_time': '2026-10-20T00:00Z'}).status_code, 503)
+        shapes = client.get('/api/provinces/shapes').json()
+        self.assertEqual(len(shapes['features']), 34)

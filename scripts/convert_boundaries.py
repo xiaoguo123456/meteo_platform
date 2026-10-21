@@ -37,6 +37,15 @@ def convert(source):
     flush()
     return {'type':'FeatureCollection','features':features},original
 
+def signed_area(ring):
+    return sum(x0*y1-x1*y0 for (x0,y0),(x1,y1) in zip(ring,ring[1:]))/2
+
+
+def orient(polygon):
+    """d3-geo 球面填色要求外环顺时针、洞逆时针（与 RFC 7946 相反），否则会填满整个地球。"""
+    return [ring if (signed_area(ring)<0)==(i==0) else ring[::-1] for i,ring in enumerate(polygon)]
+
+
 def convert_regions(source, tolerance=0.001):
     """按省级行政区合并 @P 外环与 @H 洞为 MultiPolygon，供省平均统计和选中高亮。"""
     regions={};current=None;ring=None
@@ -64,7 +73,7 @@ def convert_regions(source, tolerance=0.001):
             # 简化后不足三角形的微小岛屿保留原始坐标，避免香港、澳门等被整体丢失。
             rings=[r if len(r)>=4 else polygon[i] for i,r in enumerate(rings)]
             rings=[[[round(x,4),round(y,4)] for x,y in r] for r in rings if len(r)>=4]
-            if rings:polygons.append(rings)
+            if rings:polygons.append(orient(rings))
         features.append({'type':'Feature','properties':{'code':code,'name':region['name']},
                          'geometry':{'type':'MultiPolygon','coordinates':polygons}})
     return {'type':'FeatureCollection','features':features}
@@ -74,5 +83,9 @@ if __name__=='__main__':
     if len(sys.argv)>3:
         regions=convert_regions(source);Path(sys.argv[3]).write_text(json.dumps(regions,ensure_ascii=False,separators=(',',':')))
         print('省级面',len(regions['features']))
+    if len(sys.argv)>4:
+        # 首页按省填色只需显示精度，0.01 度容差减小下载体积；统计仍用上面的精细面。
+        shapes=convert_regions(source,0.01);Path(sys.argv[4]).write_text(json.dumps(shapes,ensure_ascii=False,separators=(',',':')))
+        print('填色面点数',sum(len(r) for f in shapes['features'] for p in f['geometry']['coordinates'] for r in p))
     result,count=convert(source);Path(sys.argv[2]).write_text(json.dumps(result,ensure_ascii=False,separators=(',',':')))
     print('线段',len(result['features']),'原始点',count,'绘制点',sum(len(f['geometry']['coordinates']) for f in result['features']))

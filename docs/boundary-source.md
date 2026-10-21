@@ -12,3 +12,5 @@
 转换脚本 `scripts/convert_boundaries.py` 保留所有 1083 条线段，省级行政区名称含港澳台，额外图元保留。线条显示采用 0.003 度容差简化，从 794169 个点减至 73799 点；未丢弃独立岛屿和边界线段。该处理仅用于边界渲染，不涉及任何气象网格的分辨率或数值。
 
 同一文件实为面数据（`@GPOLYGON`，含 @P 外环与 @H 洞）。`python scripts/convert_boundaries.py CN-border-La.gmt backend/app/data/provinces.geojson backend/app/data/province_regions.json` 额外按省级代码合并为 34 个 MultiPolygon（0.001 度容差简化，简化后不足三角形的微小岛屿保留原始坐标；面积与源数据 Shape_Area 一致，如北京 1.7348 平方度），仅用于省平均统计和选中高亮，不填色。用法见 `province-average.md`。
+
+第四个参数输出 `backend/app/data/province_shapes.json`：同样的省级面按 0.01 度容差简化，仅用于首页按省填色。两份面数据都统一为外环顺时针、洞逆时针（d3-geo 球面填色约定）；GMT 源数据本身即为此方向。

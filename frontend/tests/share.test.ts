@@ -5,6 +5,8 @@ const state={model:'ifs',field:'cloud',time:'2026-10-22T06:00Z',center:[115.004,
 const hash=buildShare(state);
 assert.equal(hash,'#home?m=ifs&f=cloud&t=2026-10-22T06:00Z&r=115.00,12.50&z=1.40&p=116.400,39.900&s=110000&c=1');
 assert.deepEqual(parseShare(hash,fieldIds),{...state,center:[115,12.5]});
+assert.equal(buildShare({model:'gfs',byProvince:true}),'#home?m=gfs&v=p');
+assert.equal(parseShare('#home?v=p',fieldIds).byProvince,true);
 console.log('通过：分享链接编码与解析往返一致');
 
 // 非法或越界参数全部忽略，不能让手改的链接打坏页面。

@@ -2,16 +2,16 @@ import NewsPage from './NewsPage';
 import StationForecast from './StationForecast';
 import {SatelliteObservationPanel, SatelliteOrbitPanel, warmSatellite, type SatelliteDetail, type SatelliteSummary} from './SatellitePanel';
 import type {EarthTexture} from './basemap';
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import PointForecast, { type ProvinceOutline } from './PointForecast';
 import PowerOutlook from './PowerOutlook';
 import WeatherGlobe from './WeatherGlobe';
-import type { SatelliteOverlay } from './WeatherGlobe';
+import type { ProvinceShapes, SatelliteOverlay } from './WeatherGlobe';
 import { ESRI_CREDIT } from './basemap';
 import { cancelPendingFrames, ForecastRunExpiredError, loadFrame } from './frameLoader';
 import type { Viewport } from './viewTiles';
 import { buildShare, nearestTime, parseShare } from './share';
-import { fields, type Grid } from './windMath';
+import { fieldColor, fields, type Grid } from './windMath';
 
 type Batch={model:string;run_time:string|null;times:string[];field_times?:Record<string,string[]>;total:number;state:string;error:string|null;pending_run_time?:string|null;pending_cached?:number;pending_total?:number;pending_state?:string;pending_error?:string|null};
 type SatelliteMode='observation'|'orbit'|false;
@@ -27,6 +27,9 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
  const shared=useRef(parseShare(location.hash,Object.keys(fields))).current;
  const pendingTime=useRef(shared.time),[shareNote,setShareNote]=useState(''),[manualLink,setManualLink]=useState('');
  const [point,setPoint]=useState<[number,number]|null>(shared.point??null),[highlight,setHighlight]=useState<ProvinceOutline|null>(null),[province,setProvince]=useState<string|null>(shared.province??null),[compare,setCompare]=useState(!!shared.compare);
+ // 按省填色：格点色块换成省平均填色，并列出全国排行。
+ const [byProvince,setByProvince]=useState(!!shared.byProvince),[shapes,setShapes]=useState<ProvinceShapes|null>(null),[rankOrder,setRankOrder]=useState<'high'|'low'>('high');
+ const [provinceValues,setProvinceValues]=useState<{field:string;values:Record<string,number[]>}|null>(null),[provinceError,setProvinceError]=useState('');
  const [model,setModel]=useState(shared.model??'gfs'),[grid,setGrid]=useState<Grid|null>(null),[field,setField]=useState(shared.field??'wind'),[loading,setLoading]=useState(true),[error,setError]=useState('');
  const [viewport,setViewport]=useState<Viewport|null>(null),[waiting,setWaiting]=useState(false);
  const [batch,setBatch]=useState<Batch|null>(null),[index,setIndex]=useState(0),[playing,setPlaying]=useState(false),[syncError,setSyncError]=useState('');
@@ -74,9 +77,19 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
   const {index:next,exact}=nearestTime(times,pendingTime.current);pendingTime.current=undefined;setIndex(next);
   if(!exact){setShareNote('分享的时刻已不在当前预报中，已切到最近时刻');setTimeout(()=>setShareNote(''),6000);}
  },[times.join(','),availableFields.join(','),field]);
- const shareHash=()=>buildShare({model,field,time:valid,center:viewport?[-viewport.rotation[0],-viewport.rotation[1]]:undefined,zoom:viewport?viewport.radius/(Math.min(viewport.width,viewport.height)*.46):undefined,point:point??undefined,province:point?province??undefined:undefined,compare:!!point&&compare});
+ useEffect(()=>{if(!byProvince||shapes)return;let active=true;fetch('/api/provinces/shapes').then(r=>{if(!r.ok)throw new Error('省份填色数据读取失败');return r.json();}).then(value=>{if(active)setShapes(value);}).catch(e=>{if(active)setProvinceError(e.message);});return()=>{active=false;};},[byProvince]);
+ // 切换时刻时保留上一帧的填色，新数值到达后整体替换，播放不闪烁。
+ useEffect(()=>{if(satelliteMode||!byProvince||!run||!valid)return;const abort=new AbortController();
+  fetch(`/api/province-map/${model}?${new URLSearchParams({field,run_time:run,valid_time:valid})}`,{signal:abort.signal}).then(async r=>{const body=await r.json();if(!r.ok)throw new Error(body.detail||'省平均读取失败');return body;}).then(body=>{setProvinceValues({field,values:body.values});setProvinceError('');}).catch(e=>{if(!abort.signal.aborted)setProvinceError(e.message);});
+  return()=>abort.abort();
+ },[satelliteMode,byProvince,model,field,run,valid]);
+ // 省平均把极值抹平，风速、降水省平均多在 0–20 之间，按格点 0–50 的色标几乎同色；按省时压缩色标并同步图例。
+ const colorScale=byProvince&&(field==='wind'||field==='precipitation')?2.5:1;
+ const provinceFill=useMemo(()=>byProvince&&shapes&&provinceValues&&provinceValues.field===field?{shapes,colors:Object.fromEntries(Object.entries(provinceValues.values).map(([code,v])=>[code,`rgba(${fieldColor(field,v[0]*colorScale).join(',')},.9)`]))}:null,[byProvince,shapes,provinceValues,field,colorScale]);
+ const ranking=byProvince&&shapes&&provinceValues&&provinceValues.field===field?shapes.features.filter(f=>provinceValues.values[f.properties.code]).map(f=>({...f.properties,value:provinceValues.values[f.properties.code][0]})).sort((a,b)=>rankOrder==='high'?b.value-a.value:a.value-b.value).slice(0,5):[];
+ const shareHash=()=>buildShare({model,field,time:valid,center:viewport?[-viewport.rotation[0],-viewport.rotation[1]]:undefined,zoom:viewport?viewport.radius/(Math.min(viewport.width,viewport.height)*.46):undefined,point:point??undefined,province:point?province??undefined:undefined,compare:!!point&&compare,byProvince});
  // 替换而非新增历史记录，拖动时间轴不会塞满浏览器后退列表；等链接里的时刻恢复后才开始写。
- useEffect(()=>{if(satelliteMode||pendingTime.current)return;const timer=setTimeout(()=>history.replaceState(null,'',shareHash()),400);return()=>clearTimeout(timer);},[satelliteMode,model,field,valid,viewport,point,province,compare]);
+ useEffect(()=>{if(satelliteMode||pendingTime.current)return;const timer=setTimeout(()=>history.replaceState(null,'',shareHash()),400);return()=>clearTimeout(timer);},[satelliteMode,model,field,valid,viewport,point,province,compare,byProvince]);
  // 剪贴板接口被拒时退回旧式复制；仍失败则把链接选中显示，由用户手动复制。
  const copyLink=async()=>{const url=`${location.origin}${location.pathname}${shareHash()}`;let copied=false;
   try{await navigator.clipboard.writeText(url);copied=true;}catch{const area=document.createElement('textarea');area.value=url;area.style.position='fixed';area.style.opacity='0';document.body.appendChild(area);area.select();try{copied=document.execCommand('copy');}catch{}area.remove();}
@@ -139,7 +152,7 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
   return()=>{active=false;clearTimeout(timer);};
  },[playing,loading,grid,index,valid,viewport,run,model,field,times.length,activeBatch?.state,handleFrameError]);
  const spec=fields[grid?.meta.field||field];
- const ticks=Array.from({length:5},(_,i)=>spec.min+(spec.max-spec.min)*i/4);
+ const ticks=Array.from({length:5},(_,i)=>(spec.min+(spec.max-spec.min)*i/4)/colorScale);
  const gradient=`linear-gradient(90deg,${spec.colors.map(c=>`rgb(${c.slice(1).join(',')}) ${(c[0]-spec.min)/(spec.max-spec.min)*100}%`).join(',')})`;
  const time=formatTime(grid?.meta.valid_time);
  const displayedRun=grid?.meta.run_time||run;
@@ -148,19 +161,24 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
  if(satelliteDetail){const track=(satelliteDetail.track||[]).map(point=>({longitude:point.longitude,latitude:point.latitude}));const overlay=satelliteOverlays.find(item=>item.id===satelliteDetail.id);if(overlay){overlay.track=track;overlay.position={longitude:satelliteDetail.position?.longitude??overlay.position.longitude,latitude:satelliteDetail.position?.latitude??overlay.position.latitude};}else{satelliteOverlays.push({id:satelliteDetail.id,name:satelliteDetail.name,category:satelliteDetail.category,color:'#d97745',position:{longitude:satelliteDetail.position?.longitude??0,latitude:satelliteDetail.position?.latitude??0},track});}}
 
  return <div className="app-shell"><main className="weather-workspace">
-  <WeatherGlobe onPoint={p=>{if(!satelliteMode)setPoint(p);}} satellite={satelliteObservationMode?satellite:null} onViewChange={setViewport} grid={satelliteMode?null:grid} animated={!satelliteMode&&grid?.meta.field==='wind'} satellites={satelliteOrbitMode?satelliteOverlays:[]} selectedSatelliteId={satelliteOrbitMode?selectedSatelliteId:undefined} highlight={!satelliteMode&&point?highlight:null} onSatelliteClick={satelliteOrbitMode?setSelectedSatelliteId:undefined} initialView={shared.center||shared.zoom?{zoom:shared.zoom??1,rotation:shared.center?[-shared.center[0],-shared.center[1],0]:[-115,-12,0]}:undefined}/>
+  <WeatherGlobe onPoint={p=>{if(!satelliteMode)setPoint(p);}} satellite={satelliteObservationMode?satellite:null} onViewChange={setViewport} grid={satelliteMode?null:grid} animated={!satelliteMode&&grid?.meta.field==='wind'} satellites={satelliteOrbitMode?satelliteOverlays:[]} selectedSatelliteId={satelliteOrbitMode?selectedSatelliteId:undefined} highlight={!satelliteMode&&point?highlight:null} colorize={!!satelliteMode||!byProvince} provinceFill={satelliteMode?null:provinceFill} onSatelliteClick={satelliteOrbitMode?setSelectedSatelliteId:undefined} initialView={shared.center||shared.zoom?{zoom:shared.zoom??1,rotation:shared.center?[-shared.center[0],-shared.center[1],0]:[-115,-12,0]}:undefined}/>
   {!satelliteMode&&point&&displayedRun&&availableFields.length>0&&<PointForecast point={point} model={model} run={displayedRun} available={availableFields} province={province} onProvince={setProvince} compare={compare} onCompare={setCompare} onClose={()=>{setPoint(null);setProvince(null);setCompare(false);}} onHighlight={setHighlight}/>}
 
   {!satelliteMode&&status&&<div role="status" className={`load-status ${error||syncError?'error':''}`}>{status}</div>}
   {satelliteObservationMode?<div className="satellite-modules"><SatelliteObservationPanel onTexture={setSatellite}/></div>:satelliteOrbitMode?<div className="satellite-modules"><SatelliteOrbitPanel satellites={satellites} selectedId={selectedSatelliteId} detail={satelliteDetail} onSelect={setSelectedSatelliteId} orbitAt={orbitAt} orbitCount={orbitCount} onOrbitAtChange={setOrbitAt} onOrbitCountChange={setOrbitCount}/></div>:<aside className="control-panel">
    <div className="control-line"><span className="control-key">模式</span><div className="choice-row">{['gfs','grapes','ifs','aifs'].map(m=><button key={m} className={`choice ${model===m?'active':''}`} onClick={()=>setModel(m)}>{m.toUpperCase()}</button>)}</div></div>
    <div className="control-line"><span className="control-key">要素</span><div className="choice-row">{Object.entries(fields).filter(([id])=>availableFields.includes(id)).map(([id,item])=><button key={id} className={`choice ${field===id?'active':''}`} onClick={()=>{setField(id);setIndex(0);setPlaying(false);}}>{item.label}</button>)}</div></div>
+   <div className="control-line"><span className="control-key">地图</span><div className="choice-row">{([[false,'格点'],[true,'按省']] as const).map(([value,label])=><button key={label} className={`choice ${byProvince===value?'active':''}`} aria-pressed={byProvince===value} onClick={()=>setByProvince(value)}>{label}</button>)}</div></div>
    {grid&&<div className="control-line"><span className="control-key">层次</span><span className="choice">{grid.meta.level}{grid.meta.field==='precipitation'&&grid.meta.interval_start?`（${formatTime(grid.meta.interval_start)}—${formatTime(grid.meta.valid_time)}）`:''}</span></div>}
    <div className="run-readout">起报 {formatTime(displayedRun)} · 北京时间{batch?.state==='syncing'&&<span>缓存 {batch.pending_cached??batch.times.length}/{batch.pending_total??batch.total}</span>}{batch?.pending_state==='syncing'&&<span>更新缓存 {batch.pending_cached??0}/{batch.pending_total??0}</span>}</div>
    <div className="timeline"><button aria-label={playing?'暂停预报播放':'播放预报'} disabled={!activeBatch||times.length<2||!!error} onClick={()=>{if(playing){setPlaying(false);return;}if(index>=times.length-1)setIndex(0);setWaiting(false);setPlaying(true);}}>{playing?'Ⅱ':'▶'}</button><input aria-label="预报时间" type="range" min="0" max={Math.max(0,(times.length||1)-1)} value={index} disabled={!times.length} onChange={e=>{setPlaying(false);setIndex(Number(e.target.value));}}/></div>
    <div className="timeline-labels"><span>{formatTime(times[0])}</span><span>{formatTime(times[times.length-1])}</span></div>
    <div className="panel-divider"/><div className="forecast-readout"><strong>{time}</strong><span>北京时间</span></div>
    {grid&&<div className="wind-legend"><div style={{background:gradient}}/>{ticks.map((n,i)=><span key={n} style={{position:'absolute',left:`${i*25}%`,transform:i===0?undefined:i===4?'translateX(-100%)':'translateX(-50%)'}}>{n}{i===4?` ${spec.unit}`:''}</span>)}</div>}
+   {byProvince&&<div className="rank-card"><div className="rank-head"><span>全国排行 · 省平均{spec.label}</span><div className="choice-row">{([['high','最高'],['low','最低']] as const).map(([value,label])=><button key={value} className={`choice ${rankOrder===value?'active':''}`} aria-pressed={rankOrder===value} onClick={()=>setRankOrder(value)}>{label}</button>)}</div></div>
+    {provinceError?<p className="rank-note">{provinceError}</p>:!ranking.length?<p className="rank-note">正在读取省平均…</p>:<ol>{ranking.map((item,i)=><li key={item.code}><button onClick={()=>{setPoint(item.label);setProvince(item.code);}}><b>{i+1}</b><span>{item.name}</span><em>{item.value.toFixed(field==='precipitation'?2:1)} {spec.unit}</em></button></li>)}</ol>}
+    {/* GFS 温湿为 1000hPa，青藏高原等地该层在地面以下，数值为外推，排行最易误读。 */}
+    {model==='gfs'&&['temperature','humidity'].includes(field)&&<p className="rank-note warn">GFS 为 1000hPa 层，高原省份为外推值，排行仅供参考</p>}</div>}
    <div className="share-row"><button className="choice" onClick={()=>void copyLink()}>复制分享链接</button>{shareNote&&<span role="status">{shareNote}</span>}</div>
    {manualLink&&<input className="share-manual" aria-label="分享链接" readOnly value={manualLink} autoFocus onFocus={e=>e.currentTarget.select()} onBlur={()=>setManualLink('')}/>}
 

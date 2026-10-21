@@ -372,6 +372,23 @@ def locate_province(longitude: float, latitude: float):
     from .province_stats import locate
     return locate(longitude, latitude)
 
+@app.get('/api/provinces/shapes')
+def province_shapes():
+    from fastapi.responses import JSONResponse
+    from .province_stats import shapes
+    return JSONResponse(shapes(), headers={'Cache-Control': 'public, max-age=86400'})
+
+@app.get('/api/province-map/{model_id}')
+async def province_values(model_id: str, field: str, run_time: str, valid_time: str):
+    """某一时刻全部省份的省平均，固定批次与时刻的结果不会变化。"""
+    from fastapi.responses import JSONResponse
+    from .province_stats import province_map
+    try:
+        value = await asyncio.to_thread(province_map, model_id, field, run_time, valid_time)
+    except (ValueError, SpatialDataError, OSError, KeyError) as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    return JSONResponse(value, headers={'Cache-Control': 'public, max-age=86400'})
+
 @app.get('/api/provinces/{code}/outline')
 def province_outline(code: str):
     from fastapi.responses import JSONResponse
