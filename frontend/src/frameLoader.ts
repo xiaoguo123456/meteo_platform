@@ -1,4 +1,6 @@
 import type { Grid } from './windMath';
+import { BACKOFF, isNetworkSlow, RequestError, sleep } from './net';
+const STALL_MS=20000;
 export class ForecastRunExpiredError extends Error {}
 export function decodeFrame(buffer:ArrayBuffer):Grid{
  const size=new DataView(buffer).getUint32(0,true);
@@ -41,35 +43,42 @@ export function loadFrame(model:string,field:string,run:string,time:string,view:
   const sparse:Grid={meta:{...geometry(model),run_time:run,valid_time:time,model,field,level:''},u:new Float32Array(),v:new Float32Array(),tiles:{}};
   const add=(tile:Grid)=>{const m=tile.meta as Grid['meta']&{tile_x:number;tile_y:number;full_width:number;full_height:number};sparse.meta={...m,width:m.full_width,height:m.full_height};const id=m.tile_y/TILE_SIZE*Math.ceil(m.full_width/TILE_SIZE)+m.tile_x/TILE_SIZE;sparse.tiles![id]={width:m.width,u:tile.u,v:tile.v};remember(prefix+'/'+id,tile);};
   const missing:number[]=[];for(const id of ids){const tile=tileCache.get(prefix+'/'+id);if(tile)add(tile);else missing.push(id);}
-  if(missing.length){
-   const query=new URLSearchParams({field,run_time:run,valid_time:time,tiles:missing.join(','),version:'4'});
-   let response:Response|undefined;
-   for(let attempt=0;attempt<2;attempt++){
-    try{
-     // 运行批次由状态接口动态轮换，数据块 URL 已包含 run/time，
-     // 同一时次可以安全复用浏览器和 Cloudflare 的缓存。
-     response=await fetch(`/api/tiles/${model}?${query}`,{signal:controller.signal,cache:'default',priority:background?'low':'high'} as RequestInit);
-     if(controller.signal.aborted)throw new DOMException('请求已取消','AbortError');
-     if(response.ok)break;
+  // 分块流式下载：20 秒没有新数据视为卡住，中止后只补请求尚未到达的数据块；网络类失败最多重试两次。
+  for(let attempt=0;missing.some(id=>!sparse.tiles![id]);attempt++){
+   const remaining=missing.filter(id=>!sparse.tiles![id]);
+   const query=new URLSearchParams({field,run_time:run,valid_time:time,tiles:remaining.join(','),version:'4'});
+   const request=new AbortController(),forward=()=>request.abort();controller.signal.addEventListener('abort',forward,{once:true});
+   let stalled=false,watchdog:ReturnType<typeof setTimeout>|undefined;const arm=()=>{clearTimeout(watchdog);watchdog=setTimeout(()=>{stalled=true;request.abort();},STALL_MS);};
+   try{
+    arm();
+    // 运行批次由状态接口动态轮换，数据块 URL 已包含 run/time，
+    // 同一时次可以安全复用浏览器和 Cloudflare 的缓存。
+    const response=await fetch(`/api/tiles/${model}?${query}`,{signal:request.signal,cache:'default',priority:background?'low':'high'} as RequestInit);
+    if(!response.ok){
      const body=await response.text();let detail='';try{detail=JSON.parse(body).detail||'';}catch{}
      if(detail.includes('起报批次已更新'))throw new ForecastRunExpiredError(detail);
-     throw new Error(detail||`预报数据块读取失败（HTTP ${response.status}）`);
-    }catch(error){if(controller.signal.aborted||error instanceof ForecastRunExpiredError||attempt)throw error;}
-   }
-   if(!response?.ok)throw new Error('预报数据块暂时不可用');
-   const reader=response.body!.getReader();let pending=new Uint8Array(0),last=0,received=0;
-   try{while(true){
-    const result=await reader.read();if(result.done)break;
-    const combined=new Uint8Array(pending.length+result.value.length);combined.set(pending);combined.set(result.value,pending.length);pending=combined;
-    while(pending.length>=4){
-     const length=new DataView(pending.buffer,pending.byteOffset,4).getUint32(0,true);if(pending.length<length+4)break;
-     const compressed=pending.slice(4,4+length);pending=pending.slice(4+length);
-     const decoded=await new Response(new Blob([compressed]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-     if(controller.signal.aborted)throw new DOMException('请求已取消','AbortError');add(decodeFrame(decoded));received++;
-     if(onProgress&&performance.now()-last>250){onProgress({...sparse,meta:{...sparse.meta,complete:false},tiles:{...sparse.tiles}});last=performance.now();}
+     throw new RequestError(detail||`预报数据块读取失败（HTTP ${response.status}）`,response.status);
     }
-   }}finally{reader.releaseLock();}
-   if(pending.length||received!==missing.length)throw new Error('预报数据块传输不完整');
+    const reader=response.body!.getReader();let pending=new Uint8Array(0),last=0;
+    try{while(true){
+     const result=await reader.read();if(result.done)break;arm();
+     const combined=new Uint8Array(pending.length+result.value.length);combined.set(pending);combined.set(result.value,pending.length);pending=combined;
+     while(pending.length>=4){
+      const length=new DataView(pending.buffer,pending.byteOffset,4).getUint32(0,true);if(pending.length<length+4)break;
+      const compressed=pending.slice(4,4+length);pending=pending.slice(4+length);
+      const decoded=await new Response(new Blob([compressed]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+      if(controller.signal.aborted)throw new DOMException('请求已取消','AbortError');add(decodeFrame(decoded));
+      if(onProgress&&performance.now()-last>250){onProgress({...sparse,meta:{...sparse.meta,complete:false},tiles:{...sparse.tiles}});last=performance.now();}
+     }
+    }}finally{reader.releaseLock();}
+    if(pending.length||missing.some(id=>!sparse.tiles![id]))throw new RequestError('预报数据块传输不完整',0);
+   }catch(error){
+    if(controller.signal.aborted)throw new DOMException('请求已取消','AbortError');
+    if(error instanceof ForecastRunExpiredError)throw error;
+    const failure=stalled?new RequestError('网络较慢，预报数据块下载超时',0,true):error instanceof RequestError?error:new RequestError('网络连接失败',0);
+    if(!isNetworkSlow(failure)||attempt>=2)throw failure;
+    await sleep(BACKOFF[attempt],controller.signal);
+   }finally{clearTimeout(watchdog);controller.signal.removeEventListener('abort',forward);}
   }
   entry.pending=false;
   while(frames.size>8){const first=[...frames].find(([url,e])=>url!==key&&!e.pending);if(!first)break;frames.delete(first[0]);}

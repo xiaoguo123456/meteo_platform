@@ -120,3 +120,4 @@ button:focus-visible { outline:2px solid #367a80; outline-offset:5px; border-rad
 .pill-expand{flex:none;padding:3px 10px;border:1px solid #cad8db;border-radius:999px;background:transparent;color:#12656b;font-size:11px;cursor:pointer}
 @media(max-width:740px){.control-pill{left:15px;max-width:calc(100% - 30px)}}
 @media(max-width:470px){.pill-legend{display:none}}
+.point-error{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.point-error .choice{font-size:12px;text-decoration:underline;text-underline-offset:3px}

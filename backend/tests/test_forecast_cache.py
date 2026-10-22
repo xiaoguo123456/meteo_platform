@@ -233,3 +233,18 @@ class CloudFieldTests(ForecastCacheFixture):
         series=province_forecast('ifs','cloud','110000',status['run_time'])
         self.assertEqual([p['mean'] for p in series['points']],[10,50])
         self.assertEqual(series['unit'],'%')
+
+
+class RunsEndpointTests(ForecastCacheFixture):
+    def test_runs_cached_briefly_at_edge_only(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        with patch.object(cache,'latest_manifest',return_value=self.manifest),patch.object(cache,'read_native_snapshot',side_effect=self.native):
+            cache.sync_once(['gfs'])
+        response=TestClient(app).get('/api/models/gfs/runs')
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.json()['run_time'],self.manifest['reference_time'])
+        # 浏览器每次重新取；Cloudflare 只短暂缓存，并在过期后先回旧值、后台刷新。
+        self.assertEqual(response.headers['cache-control'],'no-cache')
+        self.assertEqual(response.headers['cloudflare-cdn-cache-control'],'max-age=5, stale-while-revalidate=30')
+        self.assertEqual(response.headers['cdn-cache-control'],'max-age=5, stale-while-revalidate=30')

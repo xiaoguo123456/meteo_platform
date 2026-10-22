@@ -2,10 +2,12 @@ import {useEffect,useState} from 'react';
 import {fields} from './windMath';
 import {largestSpread,valueAt,type SeriesPoint} from './compareMath';
 import {MODELS} from './share';
+import {fetchJson} from './net';
 const COLORS:Record<string,string>={gfs:'#127e87',grapes:'#c0612b',ifs:'#4f5fb0',aifs:'#9a5d74'};
 const time=(s:string)=>new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',hour12:false}).format(new Date(s));
 type Result={model:string;state:'loading'|'ok'|'missing'|'empty'|'error';run?:string;level?:string;points:SeriesPoint[];message?:string};
-const read=async(url:string,signal:AbortSignal)=>{const r=await fetch(url,{signal,cache:'no-store'});const body=await r.json();if(!r.ok)throw new Error(body.detail||'读取失败');return body;};
+// 起报清单绕过浏览器缓存（Cloudflare 规则会把浏览器缓存改成 4 小时）；统一限时与重试。
+const read=(url:string,signal:AbortSignal)=>fetchJson(url,{signal,cache:'no-store'});
 // 每个模型用自己最新的起报批次，分别读取单点或省平均，再按实际时刻画在同一张图上。
 export default function ModelCompare({point,province,field}:{point:[number,number];province:string;field:string}){
  const [results,setResults]=useState<Result[]>([]),[hover,setHover]=useState<number|null>(null);

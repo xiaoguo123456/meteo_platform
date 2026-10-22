@@ -1,6 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {fields} from './windMath';
 import ModelCompare from './ModelCompare';
+import { fetchJson } from './net';
 type Point={time:string;value:number|null;min?:number|null;max?:number|null;direction?:number|null};
 type Forecast={level:string;run_time:string;points:Point[];grid_longitude?:number;grid_latitude?:number;name?:string;cells?:number;nearest?:boolean;resolution?:number};
 type Province={code:string;name:string};
@@ -8,7 +9,8 @@ export type ProvinceOutline={type:'Feature';properties:Province;geometry:unknown
 const time=(s:string)=>new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',hour12:false}).format(new Date(s));
 // 直辖市称"全市"，自治区、特别行政区称"全区"，其余称"全省"。
 const scopeLabel=(name:string)=>name.endsWith('市')?'全市平均':name.endsWith('区')?'全区平均':'全省平均';
-const read=async(url:string,signal?:AbortSignal)=>{const r=await fetch(url,{signal});const body=await r.json();if(!r.ok)throw new Error(body.detail||'读取失败');return body;};
+// 统一限时与重试，网络卡住时不会一直停在"正在读取"。
+const read=(url:string,signal?:AbortSignal)=>fetchJson(url,{signal});
 // 省份目录和轮廓不随批次变化，整个页面共用一份。
 let provinceList:Promise<Province[]>|null=null;const outlines=new Map<string,Promise<ProvinceOutline>>();
 const listProvinces=()=>{provinceList??=read('/api/provinces').catch(e=>{provinceList=null;throw e;});return provinceList;};
@@ -54,7 +56,7 @@ export default function PointForecast({point,model,run,available,province:select
    {province&&provinces.length>0&&<select aria-label="选择省份" value={province} onChange={e=>onProvince(e.target.value)}>{provinces.map(p=><option key={p.code} value={p.code}>{p.name}</option>)}</select>}</div>}
   <div className="point-fields"><div className="choice-row">{available.map(id=><button key={id} className={`choice ${id===field?'active':''}`} onClick={()=>setField(id)}>{fields[id].label}</button>)}</div><button className={`choice compare-toggle ${compare?'active':''}`} aria-pressed={compare} onClick={()=>onCompare(!compare)}>四模型对比</button></div>
   <div className="run-readout">{compare?'GFS · GRAPES · IFS · AIFS 各取最新起报 · 北京时间':`${model.toUpperCase()} · 起报 ${time(run)} · 北京时间`}</div>
-  {compare?<ModelCompare point={point} province={province} field={field}/>:error?<p role={error.includes('正在后台计算')?'status':'alert'}>{error}</p>:!data?<p role="status">{province?'正在读取省平均预报…':'正在读取单点预报…'}</p>:<>
+  {compare?<ModelCompare point={point} province={province} field={field}/>:error?<p className="point-error" role={error.includes('正在后台计算')?'status':'alert'}>{error}<button className="choice" onClick={()=>setRetry(v=>v+1)}>重试</button></p>:!data?<p role="status">{province?'正在读取省平均预报…':'正在读取单点预报…'}</p>:<>
    <div className="run-readout">{province?`${data.level} · ${data.nearest?'面积小于网格，取最近格点':`面积加权平均 · ${data.cells} 个格点（${data.resolution}°）`}`:`${data.level} · 最近网格 ${data.grid_longitude!.toFixed(3)}°, ${data.grid_latitude!.toFixed(3)}°`}</div>
    <svg viewBox="0 0 520 180" role="img" aria-label={`${spec.label}${province?'省平均':''}预报折线图`} onPointerMove={e=>{const rect=e.currentTarget.getBoundingClientRect(),t=start+((e.clientX-rect.left)/rect.width*520-45)/450*(end-start);let nearest=0;data.points.forEach((p,i)=>{if(Math.abs(Date.parse(p.time)-t)<Math.abs(Date.parse(data.points[nearest].time)-t))nearest=i;});setHover(nearest);}}>
     {[lo,(lo+hi)/2,hi].map((v,i)=><g key={i}><path d={`M45 ${y(v)}H495`} stroke="#dbe4e5"/><text x="1" y={y(v)+4} fontSize="11" fill="#52686c">{v.toFixed(1)}</text></g>)}

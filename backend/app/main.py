@@ -244,13 +244,16 @@ async def power_outlook_data(
 def model_runs(model_id: str) -> dict[str, object]:
     try:
         from fastapi.responses import JSONResponse
-        # 起报清单会在后台轮换，禁止浏览器和 Cloudflare 复用旧批次。
+        # 国内经 Cloudflare 洛杉矶节点回源很慢：边缘缓存 5 秒、过期后 30 秒内先返回旧清单并后台刷新，
+        # 每 10 秒的轮询大多在边缘直接返回。切换后上一批仍保留，晚几十秒看到新批次也不会读取失败。
+        # 浏览器不缓存（前端另以 no-store 请求，绕过 Cloudflare 规则改写的浏览器缓存时间）。
+        edge = "max-age=5, stale-while-revalidate=30"
         return JSONResponse(
             read_public_status(model_id),
             headers={
-                "Cache-Control": "no-store",
-                "CDN-Cache-Control": "no-store",
-                "Cloudflare-CDN-Cache-Control": "no-store",
+                "Cache-Control": "no-cache",
+                "CDN-Cache-Control": edge,
+                "Cloudflare-CDN-Cache-Control": edge,
             },
         )
     except SpatialDataError as error:

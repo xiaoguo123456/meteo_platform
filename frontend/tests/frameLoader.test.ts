@@ -24,8 +24,17 @@ try{
  await assert.rejects(loadFrame('gfs','wind','2026-10-13T00:00Z','2026-10-13T00:00Z',view),ForecastRunExpiredError);
  assert.equal(requests,1,'失效批次应交给时间轴刷新，不能重复下载同一失效地址');
  requests=0;
- globalThis.fetch=async()=>{requests++;return new Response(JSON.stringify({detail:'临时读取失败'}),{status:503});};
- await assert.rejects(loadFrame('gfs','wind','2026-10-13T06:00Z','2026-10-13T06:00Z',view),/临时读取失败/);
- assert.equal(requests,2,'临时故障仍保留一次重试');
+ globalThis.fetch=async()=>{requests++;return new Response(JSON.stringify({detail:'该预报时刻尚未缓存完成'}),{status:503});};
+ await assert.rejects(loadFrame('gfs','wind','2026-10-13T06:00Z','2026-10-13T06:00Z',view),/尚未缓存完成/);
+ assert.equal(requests,1,'后端业务错误重试也不会好，不重复请求');
+ // 网络类失败（Cloudflare 524 回源超时、连接断开）按退避最多重试两次。
+ requests=0;
+ globalThis.fetch=async()=>{requests++;return new Response('origin timeout',{status:524});};
+ await assert.rejects(loadFrame('gfs','wind','2026-10-13T09:00Z','2026-10-13T09:00Z',view),/HTTP 524/);
+ assert.equal(requests,3,'网关超时重试两次');
+ requests=0;
+ globalThis.fetch=async()=>{requests++;throw new TypeError('Failed to fetch');};
+ await assert.rejects(loadFrame('gfs','wind','2026-10-13T12:00Z','2026-10-13T12:00Z',view),/网络连接失败/);
+ assert.equal(requests,3,'连接断开重试两次');
 }finally{globalThis.fetch=originalFetch;}
-console.log('通过：失效批次可识别且不盲目重试，临时故障保留重试');
+console.log('通过：失效批次与业务错误不盲目重试，网络类失败退避重试');

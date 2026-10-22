@@ -12,6 +12,7 @@ import { cancelPendingFrames, ForecastRunExpiredError, loadFrame } from './frame
 import type { Viewport } from './viewTiles';
 import { buildShare, nearestTime, parseShare } from './share';
 import { createRecorder, type ExportFormat, type Overlay } from './exportVideo';
+import { fetchJson, isNetworkSlow } from './net';
 import { fieldColor, fields, type Grid } from './windMath';
 
 type Batch={model:string;run_time:string|null;times:string[];field_times?:Record<string,string[]>;total:number;state:string;error:string|null;pending_run_time?:string|null;pending_cached?:number;pending_total?:number;pending_state?:string;pending_error?:string|null};
@@ -40,6 +41,10 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
  const [model,setModel]=useState(shared.model??'gfs'),[grid,setGrid]=useState<Grid|null>(null),[field,setField]=useState(shared.field??'wind'),[loading,setLoading]=useState(true),[error,setError]=useState('');
  const [viewport,setViewport]=useState<Viewport|null>(null),[waiting,setWaiting]=useState(false);
  const [batch,setBatch]=useState<Batch|null>(null),[index,setIndex]=useState(0),[playing,setPlaying]=useState(false),[syncError,setSyncError]=useState('');
+ // 网络慢导致的失败：已有画面时只给温和提示并自动重试，不弹红色错误；按来源分别记录、分别清除。
+ const [slowNotes,setSlowNotes]=useState<Record<string,string>>({});
+ const slowNote=useCallback((key:string,message='')=>setSlowNotes(old=>old[key]===message?old:{...old,[key]:message}),[]);
+ const gridRef=useRef<Grid|null>(null);gridRef.current=grid;
  const [satellites,setSatellites]=useState<SatelliteSummary[]>([]),[selectedSatelliteId,setSelectedSatelliteId]=useState(''),[satelliteDetail,setSatelliteDetail]=useState<SatelliteDetail|null>(null);
  const [orbitAt,setOrbitAt]=useState(localOrbitInput),[orbitCount,setOrbitCount]=useState(3);
  const satelliteOrbitMode=satelliteMode==='orbit';
@@ -55,23 +60,28 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
   const poll=async(force=false)=>{
    if(polling||!active)return;
    polling=true;request=new AbortController();
-   const timeout=setTimeout(()=>request?.abort(),15000);
    try{
+    // 平时读 Cloudflare 边缘缓存（几秒内有效）；批次失效时加随机参数绕过缓存。浏览器缓存始终绕过。
     const url=`/api/models/${model}/runs${force?`?refresh=${Date.now()}`:''}`;
-    const response=await fetch(url,{signal:request.signal,cache:'no-store'});const body=await response.json();
-    if(!response.ok)throw new Error(body.detail||'起报清单读取失败');
+    const body=await fetchJson<Batch>(url,{signal:request.signal,timeout:12000,retries:1,cache:'no-store'});
     if(active){
+     slowNote('runs');
      if(batchRef.current?.run_time!==body.run_time){setIndex(0);setPlaying(false);setWaiting(false);}
      batchRef.current=body;setBatch(body);
      setSyncError(body.pending_error?(body.times.length?`新预报缓存失败：${body.pending_error}`:body.pending_error):body.error||'');
      // 失败帧在清单刷新后重新读取；清单未变时也能恢复，不依赖用户拖动时间轴。
      if(failedFrame.current){failedFrame.current=false;setFrameRevision(value=>value+1);}
     }
-   }catch(e){if(active)setSyncError(e instanceof Error?(e.name==='AbortError'?'起报清单读取超时':e.message):'起报清单读取失败');}
-   finally{clearTimeout(timeout);polling=false;request=null;}
+   }catch(e){
+    if(!active)return;
+    // 已有时间轴时，一次轮询超时只提示并等下次轮询；还没有任何批次时才报错。
+    if(isNetworkSlow(e)&&batchRef.current?.times?.length)slowNote('runs','网络较慢，正在重新读取预报清单…');
+    else setSyncError(isNetworkSlow(e)?'网络较慢，预报清单读取失败，正在重试…':e instanceof Error?e.message:'起报清单读取失败');
+   }
+   finally{polling=false;request=null;}
   };
   refreshBatch.current=()=>poll(true);
-  void poll(true);const timer=setInterval(()=>void poll(),10000);
+  void poll();const timer=setInterval(()=>void poll(),10000);
   return()=>{active=false;request?.abort();clearInterval(timer);};
  },[model]);
  const activeBatch=batch?.model===model?batch:null;
@@ -84,10 +94,12 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
   const {index:next,exact}=nearestTime(times,pendingTime.current);pendingTime.current=undefined;setIndex(next);
   if(!exact){setShareNote('分享的时刻已不在当前预报中，已切到最近时刻');setTimeout(()=>setShareNote(''),6000);}
  },[times.join(','),availableFields.join(','),field]);
- useEffect(()=>{if(!byProvince||shapes)return;let active=true;fetch('/api/provinces/shapes').then(r=>{if(!r.ok)throw new Error('省份填色数据读取失败');return r.json();}).then(value=>{if(active)setShapes(value);}).catch(e=>{if(active)setProvinceError(e.message);});return()=>{active=false;};},[byProvince]);
+ useEffect(()=>{if(!byProvince||shapes)return;const abort=new AbortController();fetchJson<ProvinceShapes>('/api/provinces/shapes',{signal:abort.signal,timeout:20000}).then(setShapes).catch(e=>{if(!abort.signal.aborted)setProvinceError(isNetworkSlow(e)?'网络较慢，省份填色数据读取失败':e.message);});return()=>abort.abort();},[byProvince]);
  // 切换时刻时保留上一帧的填色，新数值到达后整体替换，播放不闪烁。
  useEffect(()=>{if(satelliteMode||!byProvince||!run||!valid)return;const abort=new AbortController();
-  fetch(`/api/province-map/${model}?${new URLSearchParams({field,run_time:run,valid_time:valid})}`,{signal:abort.signal}).then(async r=>{const body=await r.json();if(!r.ok)throw new Error(body.detail||'省平均读取失败');return body;}).then(body=>{setProvinceValues({field,valid,values:body.values});setProvinceError('');}).catch(e=>{if(!abort.signal.aborted)setProvinceError(e.message);});
+  fetchJson<{values:Record<string,number[]>}>(`/api/province-map/${model}?${new URLSearchParams({field,run_time:run,valid_time:valid})}`,{signal:abort.signal}).then(body=>{setProvinceValues({field,valid,values:body.values});setProvinceError('');slowNote('province');}).catch(e=>{if(abort.signal.aborted)return;
+   // 已有上一帧填色时保留画面，只提示网络慢。
+   if(isNetworkSlow(e)&&provinceValuesRef.current)slowNote('province','网络较慢，省平均暂未更新…');else setProvinceError(e.message);});
   return()=>abort.abort();
  },[satelliteMode,byProvince,model,field,run,valid]);
  // 省平均把极值抹平，风速、降水省平均多在 0–20 之间，按格点 0–50 的色标几乎同色；按省时压缩色标并同步图例。
@@ -108,8 +120,9 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
    setError('预报批次已失效，正在重新加载…');
    // 同一失效批次只立即刷新一次，后续跟随轮询，避免旧清单引发请求循环。
    if(refreshedRun.current!==run){refreshedRun.current=run||null;void refreshBatch.current();}
-  }else setError(e instanceof Error?e.message:'预报读取失败');
- },[run]);
+  }else if(isNetworkSlow(e)&&gridRef.current)slowNote('frame','网络较慢，该时刻画面暂未加载，稍后自动重试…');
+  else setError(e instanceof Error?e.message:'预报读取失败');
+ },[run,slowNote]);
  useEffect(()=>{
   let active=true;setError('');
   if(satelliteMode||!viewport)return;
@@ -120,7 +133,7 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
   const requestedAt=performance.now(),waitMs=playbackWait.current;playbackWait.current=0;
   // 只有完整帧才进入渲染和预取队列。逐块回调会让粒子、色带和预取任务反复重建，
   // 在全球视野下会把一次请求放大成多轮请求，是切换变慢的主要原因。
-  loadFrame(model,field,run,valid,viewport,false).then(data=>{if(active){failedFrame.current=false;refreshedRun.current=null;setError('');setGrid({...data,meta:{...data.meta,requestedAt,waitMs}});}}).catch(e=>{if(active)handleFrameError(e);}).finally(()=>{if(active)setLoading(false);});
+  loadFrame(model,field,run,valid,viewport,false).then(data=>{if(active){failedFrame.current=false;refreshedRun.current=null;setError('');slowNote('frame');setGrid({...data,meta:{...data.meta,requestedAt,waitMs}});}}).catch(e=>{if(active)handleFrameError(e);}).finally(()=>{if(active)setLoading(false);});
   return()=>{active=false;};
  },[model,field,run,valid,viewport,activeBatch?.state,satelliteMode,frameRevision,handleFrameError]);
  // 只在视野或数据上下文变化时取消请求，播放推进不能打断后续帧预取。
@@ -193,7 +206,8 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
   }catch(e){recorder.cancel();setShareNote(e instanceof Error?e.message:'导出失败');}
   finally{setExporting(null);setExportHidden(false);setTimeout(()=>setShareNote(''),5000);}
  };
- const status=error||syncError||(loading?'正在加载预报…':!times.length?(batch?.state==='ready'?'当前模型未提供该要素数据':'该要素正在提前缓存…'):'');
+ const slow=Object.values(slowNotes).find(Boolean)||'';
+ const status=error||syncError||slow||(loading?'正在加载预报…':!times.length?(batch?.state==='ready'?'当前模型未提供该要素数据':'该要素正在提前缓存…'):'');
  const satelliteOverlays:SatelliteOverlay[]=satellites.map(item=>({id:item.id,name:item.name,category:item.category,color:item.id===selectedSatelliteId?'#d97745':'#2f7f83',position:item.position?{longitude:item.position.longitude,latitude:item.position.latitude}:{longitude:0,latitude:0},track:item.track}));
  if(satelliteDetail){const track=(satelliteDetail.track||[]).map(point=>({longitude:point.longitude,latitude:point.latitude}));const overlay=satelliteOverlays.find(item=>item.id===satelliteDetail.id);if(overlay){overlay.track=track;overlay.position={longitude:satelliteDetail.position?.longitude??overlay.position.longitude,latitude:satelliteDetail.position?.latitude??overlay.position.latitude};}else{satelliteOverlays.push({id:satelliteDetail.id,name:satelliteDetail.name,category:satelliteDetail.category,color:'#d97745',position:{longitude:satelliteDetail.position?.longitude??0,latitude:satelliteDetail.position?.latitude??0},track});}}
 
