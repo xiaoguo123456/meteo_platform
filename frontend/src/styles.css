@@ -121,3 +121,5 @@ button:focus-visible { outline:2px solid #367a80; outline-offset:5px; border-rad
 @media(max-width:740px){.control-pill{left:15px;max-width:calc(100% - 30px)}}
 @media(max-width:470px){.pill-legend{display:none}}
 .point-error{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.point-error .choice{font-size:12px;text-decoration:underline;text-underline-offset:3px}
+.province-entry{display:flex;align-items:baseline;gap:10px;width:100%;margin-top:12px;padding:8px 12px;border:1px solid #cad8db;border-radius:8px;background:#f6f9f9;color:#203c43;font:inherit;text-align:left;cursor:pointer}.province-entry b{font-size:13px;font-weight:600;color:#12656b}.province-entry span{font-size:11px;color:#6a8288}.province-entry:hover{border-color:#12656b;background:#eef5f5}
+.rank-close{margin-left:4px;padding:0 4px;border:0;background:none;color:#526c74;font-size:18px;line-height:1;cursor:pointer}.rank-close:hover{color:#12656b}
