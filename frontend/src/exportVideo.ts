@@ -1,4 +1,5 @@
 // 一键导出动图：把地球三层画布合成到导出画布，叠加标题、时间、色标与水印，用 MediaRecorder 录成视频。
+// 界面入口已暂时移除（国内网络较慢，暂不提供），保留实现与测试，日后接回控制面板即可。
 export type ExportFormat='portrait'|'landscape';
 export type Overlay={title:string;subtitle:string;time:string;run:string;legend:{colors:number[][];min:number;max:number;ticks:string[]};credit:string};
 export const SIZES:Record<ExportFormat,{width:number;height:number}>={portrait:{width:1080,height:1440},landscape:{width:1920,height:1080}};
