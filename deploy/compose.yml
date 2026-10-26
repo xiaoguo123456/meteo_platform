@@ -6,8 +6,10 @@ services:
     ports:
       - "127.0.0.1:18001:8000"
     environment:
-      METEO_OPEN_METEO_BASE_URL: http://host.docker.internal:8090/v1/forecast
-      METEO_OPEN_METEO_SATELLITE_BASE_URL: http://host.docker.internal:8090/v1/archive
+      # Open-Meteo 地址由 deploy/.env 的 OPEN_METEO_ORIGIN 指定（部署流程写入）；
+      # 未设置时沿用同机部署的 8090 端口。
+      METEO_OPEN_METEO_BASE_URL: ${OPEN_METEO_ORIGIN:-http://host.docker.internal:8090}/v1/forecast
+      METEO_OPEN_METEO_SATELLITE_BASE_URL: ${OPEN_METEO_ORIGIN:-http://host.docker.internal:8090}/v1/archive
       METEO_OPEN_METEO_SATELLITE_MODEL: jma_jaxa_himawari
       WEATHER_FORECAST_CACHE: /data/forecasts
       WEATHER_DOWNLOAD_CONCURRENCY: "4"

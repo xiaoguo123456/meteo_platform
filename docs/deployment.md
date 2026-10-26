@@ -1,12 +1,14 @@
 # 晴川观象部署
 
+生产服务器：腾讯云美国硅谷 `49.51.229.109`（2 核 3.6 GB，Ubuntu 24.04），部署账号 `ubuntu`（免密 sudo）。2026-10 起由原服务器 `192.236.166.152` 迁来：itdog 全国 300+ 节点实测，新服务器电信、联通、移动成功率均 95% 以上、1 MB 中位下载 0.4–0.7 秒；原服务器经 Cloudflare 时联通成功率仅 52%，直连时移动仅 43%。原服务器继续运行 Open-Meteo（站点预测与新能源态势使用），晴川观象不再部署到原服务器。
+
 生产目录：`/opt/qingchuan`。Compose 文件：`deploy/compose.yml`，项目名 `qingchuan`。
 
-- 主机 Nginx：为 `meteo.weishenai.cn` 提供 80→443 跳转和 HTTPS，提供 `/var/www/qingchuan` 静态页面并代理 `/api/` 到 `127.0.0.1:18001`；同时保留 8091 兼容入口。
+- 主机 Nginx：`qingchuan.conf` 始终启用，80 端口（默认站点，含测试子域名与 IP 访问）与 8091 兼容入口提供 `/var/www/qingchuan` 静态页面并代理 `/api/` 到 `127.0.0.1:18001`；`meteo.weishenai.cn` 证书签发成功后再启用 `qingchuan-https.conf`（80→443 跳转与 HTTPS）。两份配置共用 `snippets/qingchuan-site.conf`。
+- Open-Meteo：不在本机运行。`deploy/.env` 的 `OPEN_METEO_ORIGIN`（部署流程按 GitHub 变量写入）指向原服务器 `http://192.236.166.152:8090`；原服务器以 `DOCKER-USER` 链只放行本机 IP（规则已用 `netfilter-persistent` 持久化，备份在 `/etc/iptables/rules.v4.backup-*`）。
 - 后端 FastAPI：Docker 内运行，绑定宿主机 `127.0.0.1:18001`，不直接暴露公网；单进程内启动后台预取。
 - 前端不再运行独立 Docker 容器，部署流程在构建机生成 `frontend/dist` 后复制到主机 Nginx 目录。
 - 数据目录：`/opt/qingchuan/data/forecasts`，挂载到后端 `/data/forecasts`。
-- 与既有 `/opt/open-meteo`、8090 端口和 Open-Meteo 数据卷独立。
 - 后端 CPU 上限 1.25 核、内存 1200 MiB。日志每服务最多 3×10 MB，自动重启与健康检查开启。主机 Nginx 由 systemd 管理。
 
 ## 缓存预取
@@ -62,17 +64,17 @@ S3 预缓存增加 `.v2.gz` 浏览器响应文件：保留原始浮点值的字�
 
 | Secret | 值 |
 |---|---|
-| `DEPLOY_HOST` | `192.236.166.152` |
-| `DEPLOY_USER` | `root` |
+| `DEPLOY_HOST` | `49.51.229.109` |
+| `DEPLOY_USER` | `ubuntu` |
 | `DEPLOY_PORT` | `22` |
 | `DEPLOY_PATH` | `/opt/qingchuan` |
 | `DEPLOY_SSH_KEY` | 服务器端 `~/.ssh/meteo-github-actions` 对应的完整私钥内容 |
 
-公钥需要提前加入服务器 `/root/.ssh/authorized_keys`。私钥只进入 GitHub Actions Secret，不提交到仓库。部署包会排除 `backend/.env.news`、`data`、本地虚拟环境和构建产物，服务器上已有的模型缓存、资讯数据库和模型密钥会保留。
+另在 **Variables** 中设置 `OPEN_METEO_ORIGIN` = `http://192.236.166.152:8090`。远端命令以 `sudo` 执行，部署账号需要免密 sudo。公钥需要提前加入服务器 `~ubuntu/.ssh/authorized_keys`。私钥只进入 GitHub Actions Secret，不提交到仓库。部署包会排除 `backend/.env.news`、`data`、本地虚拟环境和构建产物，服务器上已有的模型缓存、资讯数据库和模型密钥会保留。
 
 打包前流程把本次提交哈希、提交时间和构建时间写入 `backend/app/build_info.json`（不入库），部署后访问 `https://meteo.weishenai.cn/api/version` 即可核对线上运行的代码版本；本地开发没有该文件时直接读取 git，`dirty` 表示有未提交改动。
 
-部署完成后流程会等待 `http://127.0.0.1:8091/api/health` 返回成功，并输出后端和资讯 Worker 容器状态。主机 Nginx 和 Certbot 续期由 systemd 管理；证书续期后自动 reload Nginx。Open-Meteo 服务使用独立 Compose 项目，不会被这条流程重启。
+证书签发失败（如正式域名还未解析到本机）不会中断部署，此时只提供 HTTP；解析切到本机后，下一次部署会自动签发并启用 HTTPS。部署完成后流程会等待 `http://127.0.0.1:8091/api/health` 返回成功，并输出后端和资讯 Worker 容器状态。主机 Nginx 和 Certbot 续期由 systemd 管理；证书续期后自动 reload Nginx。Open-Meteo 服务使用独立 Compose 项目，不会被这条流程重启。
 
 ## 国内访问慢的应对
 

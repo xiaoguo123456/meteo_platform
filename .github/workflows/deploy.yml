@@ -19,6 +19,8 @@ jobs:
       DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      # 新服务器不跑 Open-Meteo，站点预测经白名单访问老服务器；见 docs/deployment.md。
+      OPEN_METEO_ORIGIN: ${{ vars.OPEN_METEO_ORIGIN }}
     steps:
       - name: 拉取代码
         uses: actions/checkout@v4
@@ -77,11 +79,14 @@ jobs:
           : "${DEPLOY_PORT:=22}"
           : "${DEPLOY_PATH:=/opt/qingchuan}"
           scp -i ~/.ssh/deploy_key -P "$DEPLOY_PORT" /tmp/qingchuan-release.tgz "$DEPLOY_USER@$DEPLOY_HOST:/tmp/qingchuan-release.tgz"
-          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "DEPLOY_PATH='$DEPLOY_PATH' bash -se" <<'EOF'
+          # 以 sudo 执行，部署账号既可以是 root，也可以是有免密 sudo 的普通用户（如 ubuntu）。
+          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "sudo DEPLOY_PATH='$DEPLOY_PATH' OPEN_METEO_ORIGIN='$OPEN_METEO_ORIGIN' bash -se" <<'EOF'
           set -eu
           install -d "$DEPLOY_PATH"
           tar --no-overwrite-dir -xzf /tmp/qingchuan-release.tgz -C "$DEPLOY_PATH"
           cd "$DEPLOY_PATH"
+          # 仓库外的部署变量写在 deploy/.env，compose 自动读取；打包内容不含此文件，不会被覆盖成空。
+          if [ -n "$OPEN_METEO_ORIGIN" ]; then printf 'OPEN_METEO_ORIGIN=%s\n' "$OPEN_METEO_ORIGIN" > deploy/.env; fi
           # 前端原先由 Docker Nginx 提供；先移除旧容器，释放 8091 给主机 Nginx。
           docker ps -aq --filter label=com.docker.compose.project=qingchuan --filter label=com.docker.compose.service=frontend | xargs -r docker rm -f
           docker compose -f deploy/compose.yml up -d --build backend news-worker
@@ -90,19 +95,29 @@ jobs:
           install -d /var/www/qingchuan
           find /var/www/qingchuan -mindepth 1 -maxdepth 1 -exec rm -rf {} +
           cp -a frontend/dist/. /var/www/qingchuan/
-          install -D -m 644 deploy/nginx/qingchuan-bootstrap.conf /etc/nginx/sites-available/qingchuan
+          # HTTP 入口始终启用（站点、API、证书校验与 8091 健康检查）；证书就绪后再叠加 HTTPS。
+          install -D -m 644 deploy/nginx/qingchuan-site.conf /etc/nginx/snippets/qingchuan-site.conf
+          install -D -m 644 deploy/nginx/qingchuan.conf /etc/nginx/sites-available/qingchuan
           ln -sfn /etc/nginx/sites-available/qingchuan /etc/nginx/sites-enabled/qingchuan
+          rm -f /etc/nginx/sites-enabled/default
           nginx -t
           systemctl enable --now nginx
           systemctl reload nginx
-          certbot certonly --webroot -w /var/www/qingchuan -d meteo.weishenai.cn --cert-name meteo.weishenai.cn --non-interactive --agree-tos --register-unsafely-without-email --keep-until-expiring
+          # 域名尚未解析到本机时签发会失败，不中断部署，站点仍可经 HTTP 访问；解析切过来后下次部署自动签发。
+          certbot certonly --webroot -w /var/www/qingchuan -d meteo.weishenai.cn --cert-name meteo.weishenai.cn --non-interactive --agree-tos --register-unsafely-without-email --keep-until-expiring \
+            || echo "证书签发未成功：meteo.weishenai.cn 可能尚未解析到本机，暂只提供 HTTP"
           install -d /etc/letsencrypt/renewal-hooks/deploy
           cat > /etc/letsencrypt/renewal-hooks/deploy/qingchuan-nginx-reload <<'HOOK'
           #!/bin/sh
           systemctl reload nginx
           HOOK
           chmod 755 /etc/letsencrypt/renewal-hooks/deploy/qingchuan-nginx-reload
-          install -D -m 644 deploy/nginx/qingchuan.conf /etc/nginx/sites-available/qingchuan
+          if [ -f /etc/letsencrypt/live/meteo.weishenai.cn/fullchain.pem ]; then
+            install -D -m 644 deploy/nginx/qingchuan-https.conf /etc/nginx/sites-available/qingchuan-https
+            ln -sfn /etc/nginx/sites-available/qingchuan-https /etc/nginx/sites-enabled/qingchuan-https
+          else
+            rm -f /etc/nginx/sites-enabled/qingchuan-https
+          fi
           nginx -t
           systemctl reload nginx
           for i in $(seq 1 30); do
