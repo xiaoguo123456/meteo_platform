@@ -70,7 +70,7 @@ S3 预缓存增加 `.v2.gz` 浏览器响应文件：保留原始浮点值的字�
 | `DEPLOY_PATH` | `/opt/qingchuan` |
 | `DEPLOY_SSH_KEY` | 服务器端 `~/.ssh/meteo-github-actions` 对应的完整私钥内容 |
 
-另在 **Variables** 中设置 `OPEN_METEO_ORIGIN` = `http://192.236.166.152:8090`。远端命令以 `sudo` 执行，部署账号需要免密 sudo。公钥需要提前加入服务器 `~ubuntu/.ssh/authorized_keys`。私钥只进入 GitHub Actions Secret，不提交到仓库。部署包会排除 `backend/.env.news`、`data`、本地虚拟环境和构建产物，服务器上已有的模型缓存、资讯数据库和模型密钥会保留。
+另设置 `OPEN_METEO_ORIGIN` = `http://192.236.166.152:8090`（Variables 或 Secrets 均可）。远端命令以 `sudo` 执行，部署账号需要免密 sudo。公钥需要提前加入服务器 `~ubuntu/.ssh/authorized_keys`。私钥只进入 GitHub Actions Secret，不提交到仓库。部署包会排除 `backend/.env.news`、`data`、本地虚拟环境和构建产物，服务器上已有的模型缓存、资讯数据库和模型密钥会保留。
 
 打包前流程把本次提交哈希、提交时间和构建时间写入 `backend/app/build_info.json`（不入库），部署后访问 `https://meteo.weishenai.cn/api/version` 即可核对线上运行的代码版本；本地开发没有该文件时直接读取 git，`dirty` 表示有未提交改动。
 

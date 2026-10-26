@@ -20,7 +20,8 @@ jobs:
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
       # 新服务器不跑 Open-Meteo，站点预测经白名单访问老服务器；见 docs/deployment.md。
-      OPEN_METEO_ORIGIN: ${{ vars.OPEN_METEO_ORIGIN }}
+      # 设在 Variables 或 Secrets 均可。
+      OPEN_METEO_ORIGIN: ${{ vars.OPEN_METEO_ORIGIN || secrets.OPEN_METEO_ORIGIN }}
     steps:
       - name: 拉取代码
         uses: actions/checkout@v4
