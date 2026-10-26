@@ -22,8 +22,9 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ../data:/data
-    mem_limit: 1200m
-    cpus: "1.25"
+    # 新服务器 2 核 3.6 GB、不跑 Open-Meteo：同步时解码、压缩与生成数据块都靠 CPU，1.25 核时网卡几乎闲置。
+    mem_limit: 1800m
+    cpus: "1.8"
     pids_limit: 128
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]

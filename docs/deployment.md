@@ -9,7 +9,7 @@
 - 后端 FastAPI：Docker 内运行，绑定宿主机 `127.0.0.1:18001`，不直接暴露公网；单进程内启动后台预取。
 - 前端不再运行独立 Docker 容器，部署流程在构建机生成 `frontend/dist` 后复制到主机 Nginx 目录。
 - 数据目录：`/opt/qingchuan/data/forecasts`，挂载到后端 `/data/forecasts`。
-- 后端 CPU 上限 1.25 核、内存 1200 MiB。日志每服务最多 3×10 MB，自动重启与健康检查开启。主机 Nginx 由 systemd 管理。
+- 后端 CPU 上限 1.8 核、内存 1800 MiB（原服务器为 1.25 核、1200 MiB；新服务器不跑 Open-Meteo，首次同步时 1.25 核即顶满而网卡只有约 8 Mbit/s，瓶颈在 CPU）。日志每服务最多 3×10 MB，自动重启与健康检查开启。主机 Nginx 由 systemd 管理。
 
 ## 缓存预取
 
