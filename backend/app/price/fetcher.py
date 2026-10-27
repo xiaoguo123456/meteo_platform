@@ -127,8 +127,8 @@ async def _fetch_once():
                 except UpstreamError as error:
                     errors.append(f"{area['name']}曲线：{error}")
                 await asyncio.sleep(REQUEST_GAP)
-            # 前一天两种价格都已定稿；当天、次日只有日前价有意义（次日日前价各省发布时间不同）。
-            plan = [(-1, 'day_ahead'), (-1, 'real_time'), (0, 'day_ahead'), (0, 'real_time'), (1, 'day_ahead')]
+            # 上游限制：日前价只能查 D-1～D+1，实时价只能查 D-3～D-1；实时价每次拉满三天，断档后可补回。
+            plan = [(-1, 'day_ahead'), (0, 'day_ahead'), (1, 'day_ahead'), (-3, 'real_time'), (-2, 'real_time'), (-1, 'real_time')]
             for offset, price_type in plan:
                 info_date = (day + timedelta(days=offset)).date().isoformat()
                 try:
