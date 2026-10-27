@@ -222,5 +222,7 @@ export default function App(){
  const [mode,setMode]=useState(getMode),[homeKey,setHomeKey]=useState(0);
  // 页面自身用 replaceState 写分享链接，不触发 hashchange；收到的 #home? 变化来自粘贴或前进后退，重新挂载首页以读取链接。
  useEffect(()=>{const changed=()=>{if(location.hash.startsWith('#home?'))setHomeKey(k=>k+1);setMode(getMode());};addEventListener('hashchange',changed);return()=>removeEventListener('hashchange',changed);},[]);
+ // 窄屏导航横向滚动，当前栏目要滚进可视范围。
+ useEffect(()=>{document.querySelector('.topbar .nav-item-active')?.scrollIntoView({block:'nearest',inline:'nearest'});},[mode]);
  return <><header className="topbar"><span className="brand-name">晴川观象</span><nav aria-label="主导航">{[['home','首页'],['observation','葵花卫星'],['satellite','卫星轨迹'],['station','站点预测'],['outlook','新能源态势'],['price','电价'],['news','资讯']].map(([id,title])=><button key={id} className={`nav-item ${mode===id?'nav-item-active':''}`} onClick={()=>{location.hash=id==='home'?'':id;setMode(id);}}>{title}</button>)}</nav></header>{mode==='news'?<NewsPage/>:mode==='price'?<PricePage/>:mode==='outlook'?<PowerOutlook/>:mode==='station'?<StationForecast/>:<WeatherApp key={homeKey} satelliteMode={mode==='satellite'?'orbit':mode==='observation'?'observation':false}/>}</>;
 }

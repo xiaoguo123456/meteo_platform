@@ -1,5 +1,5 @@
-import {useEffect,useMemo,useState} from 'react';
-import type {PointerEvent} from 'react';
+import {useEffect,useMemo,useRef,useState} from 'react';
+import type {KeyboardEvent,PointerEvent} from 'react';
 import './price.css';
 import {fetchJson} from './net';
 
@@ -20,6 +20,8 @@ const mean=(slots:Slot[],key:'day_ahead'|'real_time')=>{let sum=0,weight=0;for(c
 const DEFAULT_AREA='320000000000';
 
 function niceTicks(lo:number,hi:number,count=5){
+  // 全天同一个价（如黑龙江整天 0 元）时没有跨度，按 100 元撑开纵轴。
+  if(hi-lo<1e-6)hi=lo+100;
   const raw=(hi-lo)/count,unit=10**Math.floor(Math.log10(Math.max(raw,1e-6)));
   const step=[1,2,2.5,5,10].map(m=>m*unit).find(s=>s>=raw)??unit*10;
   // 首尾刻度向外取整，保证曲线完整落在刻度范围内。
@@ -76,6 +78,43 @@ function Stats({province}:{province:Province}){
   </dl>;
 }
 
+const beijingToday=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai'}).format(new Date());
+const dateTags=(d:DateItem,today:string)=>[d.date===today?'今天':d.date>today?'次日':'',!d.has_curve&&d.has_average?'仅均价':''].filter(Boolean);
+const Chevron=({dir}:{dir:'left'|'right'|'down'})=><svg viewBox="0 0 16 16" aria-hidden="true"><path d={dir==='down'?'M4 6l4 4 4-4':dir==='left'?'M10 4L6 8l4 4':'M6 4l4 4-4 4'}/></svg>;
+
+function DatePicker({options,value,onChange}:{options:DateItem[];value:string;onChange:(date:string)=>void}){
+  const [open,setOpen]=useState(false),[active,setActive]=useState(0);
+  const root=useRef<HTMLDivElement>(null),trigger=useRef<HTMLButtonElement>(null);
+  const today=beijingToday(),index=options.findIndex(o=>o.date===value),current=options[index];
+  useEffect(()=>{if(!open)return;setActive(Math.max(0,index));
+    const close=(event:globalThis.PointerEvent)=>{if(!root.current?.contains(event.target as Node))setOpen(false);};
+    addEventListener('pointerdown',close);return()=>removeEventListener('pointerdown',close);},[open]);
+  useEffect(()=>{if(open)root.current?.querySelector('.price-date-option.active')?.scrollIntoView({block:'nearest'});},[open,active]);
+  const pick=(i:number)=>{onChange(options[i].date);setOpen(false);trigger.current?.focus();};
+  const keys=(event:KeyboardEvent)=>{
+    if(!open){if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();setOpen(true);}return;}
+    if(event.key==='Escape'){setOpen(false);trigger.current?.focus();}
+    else if(event.key==='ArrowDown'){event.preventDefault();setActive(i=>Math.min(options.length-1,i+1));}
+    else if(event.key==='ArrowUp'){event.preventDefault();setActive(i=>Math.max(0,i-1));}
+    else if(event.key==='Enter'||event.key===' '){event.preventDefault();pick(active);}
+  };
+  // 列表按日期倒序：往前一天是下一项，往后一天是上一项。
+  return <div className="price-date" ref={root} onKeyDown={keys}>
+    <button className="price-date-step" disabled={index<0||index>=options.length-1} onClick={()=>onChange(options[index+1].date)} aria-label="前一天"><Chevron dir="left"/></button>
+    <button ref={trigger} className="price-date-current" aria-haspopup="listbox" aria-expanded={open} aria-label="选择日期" onClick={()=>setOpen(o=>!o)}>
+      <strong>{dayName(value)}</strong>
+      {current&&dateTags(current,today).map(t=><span key={t} className="price-date-tag">{t}</span>)}
+      <Chevron dir="down"/>
+    </button>
+    <button className="price-date-step" disabled={index<=0} onClick={()=>onChange(options[index-1].date)} aria-label="后一天"><Chevron dir="right"/></button>
+    {open&&<ul className="price-date-menu" role="listbox" aria-label="已保存的日期">
+      {options.map((o,i)=><li key={o.date} role="option" aria-selected={o.date===value} className={`price-date-option${i===active?' active':''}${o.date===value?' selected':''}`} onPointerEnter={()=>setActive(i)} onClick={()=>pick(i)}>
+        <span>{dayName(o.date)}</span>{dateTags(o,today).map(t=><span key={t} className="price-date-tag">{t}</span>)}
+      </li>)}
+    </ul>}
+  </div>;
+}
+
 export default function PricePage(){
   const [status,setStatus]=useState<Status|null>(null),[dates,setDates]=useState<DateItem[]>([]),[date,setDate]=useState(''),[day,setDay]=useState<Day|null>(null);
   const [area,setArea]=useState(''),[error,setError]=useState(''),[loading,setLoading]=useState(true),[tick,setTick]=useState(0);
@@ -108,9 +147,7 @@ export default function PricePage(){
               status.state==='expired'?<>{clock(status.checked_at)} 检测到失效，需要更新 token</>:
               status.state==='missing'?<>需要写入 token 后才能拉取</>:<>{status.message||'等待首次拉取'}</>}</small></div>
         </div>}
-        <select value={day?.date??date} onChange={e=>setDate(e.target.value)} aria-label="选择日期">
-          {options.map(d=><option key={d.date} value={d.date}>{dayName(d.date)}{d.has_curve?'':'（仅均价）'}</option>)}
-        </select>
+        {day&&<DatePicker options={options} value={day.date} onChange={setDate}/>}
       </div>
     </header>
 
@@ -125,7 +162,9 @@ export default function PricePage(){
           <PriceChart province={province}/>
           {day.is_today&&<p className="price-note">当天实时价可能含预出清值，以晚间最后一次拉取为准。</p>}
         </>}
-      </section>:<div className="price-empty">{dayName(day.date)}没有分时曲线。{status?.state!=='valid'&&'token 失效或未配置时无法拉取，'}明细接口只能查当天，错过的日期无法补齐。</div>}
+      </section>:<div className="price-empty">{day.is_today
+        ?<>{dayName(day.date)}还没有分时曲线。{status?.state!=='valid'?'token 失效或未配置，暂时无法拉取。':'等待下一次拉取。'}</>
+        :<>{dayName(day.date)}没有分时曲线：明细接口只能查当天，这一天没有在当天拉到。{day.averages.length>0&&'下面是各省日均价。'}</>}</div>}
 
       {day.averages.length>0&&<section className="price-card">
         <div className="price-section-head"><h2>各省日均价</h2><span>{dayName(day.date)} · 按日前均价排序</span></div>
