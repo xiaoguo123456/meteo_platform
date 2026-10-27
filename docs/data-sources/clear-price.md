@@ -150,3 +150,51 @@ token 会过期。JWT 里没有 `exp` 字段，但服务端会自行判定，实
 - 两个接口数据同源：均价排行的日前 `averagePrice` 等于明细曲线的平均值（单日和 7 天平均均已核对）。实时价尚未核对。
 - token 约半天失效且不能自动续期，定时任务需要在 401 时告警，提醒人工更新 token。
 - 本机设置了 `HTTP_PROXY` 时，代理不可用会导致请求直接失败；脚本里可显式绕过代理（如 `curl --noproxy '*'`、`httpx` 的 `trust_env=False`）。
+
+## 本站接入
+
+页面入口为 `/#price`。后端代码在 `backend/app/price/`，随 API 进程启动后台拉取任务，不另起容器。
+
+### 拉取节奏
+
+每小时 10 分拉一次，当天 23:50 再补拉一次。每轮共 11 个请求，每个请求间隔 0.6 秒：
+
+- 6 个省的当天明细（`dateType=0`）；
+- 各省均价排行（`dateType=1`）：前一天的日前价和实时价、当天的日前价和实时价、次日的日前价。
+
+API 重启时，如果距上次拉取不到 30 分钟，就跳过这一轮。
+
+### 存储
+
+数据存在 SQLite 数据库 `data/price/price.sqlite` 里，与资讯库分开：
+
+| 表 | 主键 | 内容 |
+|---|---|---|
+| `clear_price_curve` | 省份、日期、`slot_end` | 分时曲线。`slot_end` 是时段结束时刻距当日 0 点的分钟数（15–1440）；广东已从“时段开始”换算过来；原始时刻保留在 `raw_time` |
+| `province_average` | 日期、价格类型、地区 | 各省日均价和机制电价 |
+| `fetch_runs` | 自增 | 每轮拉取的结果和错误，保留最近 500 条 |
+| `state` | key | token 状态、下次拉取时间 |
+
+- 明细每次拉取都会整天替换：同一天以最后一次拉取为准，避免旧的预出清值残留在后面的时段。
+- 均价按主键覆盖写入，但新值为 `null` 时不覆盖已有的值。
+- 价格统一存成浮点数，保留 2 位小数。
+- 备份用 SQLite backup API，不要直接复制正在写入的数据库文件。
+
+### token
+
+token 存在 `data/price/token.json` 里，文件权限 600，不写入数据库，接口也不返回。文件不存在时读环境变量 `PRICE_TOKEN`。
+
+- `GET /api/price/status`：返回 token 状态和相关时间。状态有 `valid`、`expired`、`missing`、`error`、`unchecked` 几种；时间包括签发时间、预计失效时间（签发后 11 小时）、最近数据时间和下次拉取时间。
+- `POST /api/price/token`，请求体为 `{"token": "..."}`：先用新 token 真实请求一次上游，成功才保存，并立即在后台拉取一轮。返回 `{"ok": true/false, "message": "..."}`。同一进程 5 秒内只允许尝试一次，超出返回 429。
+- 管理密钥：设置了环境变量 `PRICE_ADMIN_KEY`，或存在 `data/price/admin_key` 文件时，请求头必须带 `X-Admin-Key`，否则返回 403。生产环境建议用文件方式：`deploy/.env` 每次部署都会被覆盖，`data/` 目录则会保留。
+
+```bash
+curl -X POST https://站点域名/api/price/token \
+  -H 'Content-Type: application/json' -H 'X-Admin-Key: 管理密钥' \
+  -d '{"token":"抓包得到的 JWT"}'
+```
+
+### 读取接口
+
+- `GET /api/price/dates`：列出已有数据的日期，并标明这一天有没有曲线、有没有均价。
+- `GET /api/price/day?date=YYYY-MM-DD`：返回这一天各省的曲线和各省均价。不传日期时，返回有曲线数据的最近一天。

@@ -18,6 +18,7 @@ from .satellite_service import latest_himawari, local_image_bounds, satellite_lo
 from .spatial_provider import SpatialDataError
 from .weather_service import WeatherDataError, get_weather_grid, get_weather_particles
 from .site_forecast import SiteCreate, _station, create_station, forecast as site_forecast, list_station_points, list_stations, power_outlook, satellite_radiation
+from .price.fetcher import price_loop
 from .satellite_catalog import categories as satellite_categories, constellation_members, get_satellite, list_satellites, satellite_orbit_loop, track as satellite_track
 
 
@@ -28,12 +29,14 @@ async def lifespan(app):
     satellite_task = asyncio.create_task(satellite_loop())
     orbit_task = asyncio.create_task(satellite_orbit_loop())
     basemap_task = asyncio.create_task(warm_world_imagery())
+    price_task = asyncio.create_task(price_loop())
     yield
     STOP.set()
     task.cancel()
     satellite_task.cancel()
     orbit_task.cancel()
     basemap_task.cancel()
+    price_task.cancel()
     with suppress(asyncio.CancelledError):
         await satellite_task
     with suppress(asyncio.CancelledError):
@@ -42,6 +45,8 @@ async def lifespan(app):
         await orbit_task
     with suppress(asyncio.CancelledError):
         await basemap_task
+    with suppress(asyncio.CancelledError):
+        await price_task
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
@@ -421,3 +426,5 @@ async def satellite_image(product: str, time: str):
 
 from .news.api import router as news_router
 app.include_router(news_router)
+from .price.api import router as price_router
+app.include_router(price_router)

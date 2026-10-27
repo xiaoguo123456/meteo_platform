@@ -17,6 +17,7 @@ services:
       WEATHER_POLL_SECONDS: "300"
       METEO_DATA_DIR: /data
       NEWS_DATA_DIR: /data/news
+      PRICE_DATA_DIR: /data/price
       OPENBLAS_NUM_THREADS: "1"
     extra_hosts:
       - "host.docker.internal:host-gateway"

@@ -14,4 +14,4 @@
 | 文档 | 内容 |
 |---|---|
 | [data-sources/boundary.md](data-sources/boundary.md) | 中国省界来源及处理 |
-| [data-sources/clear-price.md](data-sources/clear-price.md) | 现货出清电价接口（第三方私有接口） |
+| [data-sources/clear-price.md](data-sources/clear-price.md) | 现货出清电价接口（第三方私有接口）及本站电价页的拉取、存储和 token 接口 |

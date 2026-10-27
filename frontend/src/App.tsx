@@ -5,6 +5,7 @@ import type {EarthTexture} from './basemap';
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import PointForecast, { type ProvinceOutline } from './PointForecast';
 import PowerOutlook from './PowerOutlook';
+import PricePage from './PricePage';
 import WeatherGlobe from './WeatherGlobe';
 import type { ProvinceShapes, SatelliteOverlay } from './WeatherGlobe';
 import { ESRI_CREDIT } from './basemap';
@@ -217,9 +218,9 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
 }
 
 export default function App(){
- const getMode=()=>location.hash.startsWith('#news')?'news':location.hash==='#outlook'?'outlook':location.hash==='#station'?'station':location.hash==='#satellite'?'satellite':location.hash==='#observation'?'observation':'home';
+ const getMode=()=>location.hash.startsWith('#news')?'news':location.hash==='#outlook'?'outlook':location.hash==='#price'?'price':location.hash==='#station'?'station':location.hash==='#satellite'?'satellite':location.hash==='#observation'?'observation':'home';
  const [mode,setMode]=useState(getMode),[homeKey,setHomeKey]=useState(0);
  // 页面自身用 replaceState 写分享链接，不触发 hashchange；收到的 #home? 变化来自粘贴或前进后退，重新挂载首页以读取链接。
  useEffect(()=>{const changed=()=>{if(location.hash.startsWith('#home?'))setHomeKey(k=>k+1);setMode(getMode());};addEventListener('hashchange',changed);return()=>removeEventListener('hashchange',changed);},[]);
- return <><header className="topbar"><span className="brand-name">晴川观象</span><nav aria-label="主导航">{[['home','首页'],['observation','葵花卫星'],['satellite','卫星轨迹'],['station','站点预测'],['outlook','新能源态势'],['news','资讯']].map(([id,title])=><button key={id} className={`nav-item ${mode===id?'nav-item-active':''}`} onClick={()=>{location.hash=id==='home'?'':id;setMode(id);}}>{title}</button>)}</nav></header>{mode==='news'?<NewsPage/>:mode==='outlook'?<PowerOutlook/>:mode==='station'?<StationForecast/>:<WeatherApp key={homeKey} satelliteMode={mode==='satellite'?'orbit':mode==='observation'?'observation':false}/>}</>;
+ return <><header className="topbar"><span className="brand-name">晴川观象</span><nav aria-label="主导航">{[['home','首页'],['observation','葵花卫星'],['satellite','卫星轨迹'],['station','站点预测'],['outlook','新能源态势'],['price','电价'],['news','资讯']].map(([id,title])=><button key={id} className={`nav-item ${mode===id?'nav-item-active':''}`} onClick={()=>{location.hash=id==='home'?'':id;setMode(id);}}>{title}</button>)}</nav></header>{mode==='news'?<NewsPage/>:mode==='price'?<PricePage/>:mode==='outlook'?<PowerOutlook/>:mode==='station'?<StationForecast/>:<WeatherApp key={homeKey} satelliteMode={mode==='satellite'?'orbit':mode==='observation'?'observation':false}/>}</>;
 }

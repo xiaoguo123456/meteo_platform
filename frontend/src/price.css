@@ -1,0 +1,89 @@
+.price-page{max-width:1180px;margin:0 auto;padding:112px 40px 56px;color:#243f49}
+.price-heading{display:flex;justify-content:space-between;align-items:end;gap:24px;margin-bottom:24px}
+.price-eyebrow{font-size:11px;letter-spacing:.18em;color:#5c8388}
+.price-heading h1{font:600 34px/1.25 'Noto Serif SC',serif;letter-spacing:.04em;margin:8px 0}
+.price-heading p{color:#748b90;font-size:13px;margin:0}
+.price-heading-side{display:flex;align-items:center;gap:12px}
+.price-heading select{height:36px;border:1px solid #d2e1e1;border-radius:5px;background:#fff;padding:0 10px;font-size:12px;color:#36555c;outline-color:#55a0a1}
+.price-token{display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid #d0e0e0;border-radius:8px;background:rgba(250,253,252,.9);max-width:330px}
+.price-token strong{display:block;font-size:12px;font-weight:600}
+.price-token small{display:block;font-size:11px;color:#7a9095;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.price-token-dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px;background:#9bb1b3}
+.price-token-valid .price-token-dot{background:#2f8f6f}
+.price-token-expired,.price-token-missing{border-color:#e8c9bf;background:#fdf6f3}
+.price-token-expired .price-token-dot,.price-token-missing .price-token-dot{background:#c0563f}
+.price-token-expired strong,.price-token-missing strong{color:#a54f43}
+.price-token-error .price-token-dot{background:#c6904c}
+.price-card{border:1px solid #d0e0e0;border-radius:10px;background:rgba(250,253,252,.92);padding:20px 22px;margin-bottom:20px}
+.price-tabs{display:flex;gap:6px;border-bottom:1px solid #e1ecec;margin:-4px -4px 18px;padding:0 0 12px;overflow-x:auto;scrollbar-width:none}
+.price-tabs::-webkit-scrollbar{display:none}
+.price-tabs button{flex:0 0 auto;border:0;background:transparent;border-radius:6px;padding:7px 14px;cursor:pointer;text-align:left;color:#5f7d82}
+.price-tabs button:hover{background:#eef6f5}
+.price-tabs button.active{background:#e3f1ef;color:#1f5f62}
+.price-tabs strong{display:block;font-size:13px;font-weight:600}
+.price-tabs span{display:block;font:500 11px/1.4 'DM Mono',monospace;color:#86a0a3;margin-top:2px}
+.price-tabs button.active span{color:#27787b}
+.price-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:0 0 18px}
+.price-stats div{border-left:2px solid #dbe8e7;padding:2px 0 2px 12px}
+.price-stats dt{font-size:11px;color:#7d9397}
+.price-stats dd{margin:4px 0 0;font:500 22px/1.2 'DM Mono',monospace;color:#21434b}
+.price-stats dd.negative{color:#a54f43}
+.price-stats small{font-size:11px;color:#8ea2a6;margin-left:6px}
+.price-legend{display:flex;align-items:center;gap:16px;font-size:11px;color:#5f7d82;margin-bottom:10px}
+.price-legend span{display:flex;align-items:center;gap:6px}
+.price-legend i,.price-tip i{display:inline-block;width:14px;height:3px;border-radius:2px}
+.price-legend em{margin-left:auto;font-style:normal;color:#8ea2a6}
+.price-chart{--chart-h:300px;display:grid;grid-template-columns:44px minmax(0,1fr);grid-template-rows:var(--chart-h) 22px}
+.price-chart-y{position:relative}
+.price-chart-y span{position:absolute;right:8px;transform:translateY(-50%);font:500 10px 'DM Mono',monospace;color:#8ea2a6}
+.price-chart-plot{position:relative;cursor:crosshair;touch-action:pan-y}
+.price-chart-plot svg{width:100%;height:100%;overflow:visible;display:block}
+.price-grid{stroke:#e7efee;stroke-dasharray:2 3}
+.price-zero{stroke:#9ab3b4}
+.price-line{fill:none;stroke-width:1.8;stroke-linejoin:round;stroke-linecap:round}
+.price-guide{position:absolute;top:0;bottom:0;width:1px;background:#8fb4b3;pointer-events:none}
+.price-tip{position:absolute;top:6px;background:#fff;border:1px solid #d0e0e0;border-radius:6px;padding:7px 10px;font-size:11px;box-shadow:0 4px 14px rgba(36,63,73,.08);pointer-events:none;white-space:nowrap}
+.price-tip strong{display:block;font:500 11px 'DM Mono',monospace;margin-bottom:4px}
+.price-tip span{display:flex;align-items:center;gap:6px;font-family:'DM Mono',monospace;color:#36555c}
+.price-chart-x{grid-column:2;position:relative}
+.price-chart-x span{position:absolute;top:6px;transform:translateX(-50%);font:500 10px 'DM Mono',monospace;color:#8ea2a6}
+.price-chart-x span:first-child{transform:none}
+.price-chart-x span:last-child{transform:translateX(-100%)}
+.price-chart-empty,.price-empty{padding:48px 20px;text-align:center;color:#7d9397;font-size:13px}
+.price-empty{border:1px dashed #d0e0e0;border-radius:10px;margin-bottom:20px;line-height:1.8}
+.price-note{margin:14px 0 0;font-size:11px;color:#8ea2a6}
+.price-section-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px}
+.price-section-head h2{font:600 17px 'Noto Serif SC',serif;margin:0}
+.price-section-head span{font-size:11px;color:#8ea2a6}
+.price-table-wrap{overflow-x:auto}
+.price-table{width:100%;border-collapse:collapse;font-size:12px;min-width:560px}
+.price-table th{font-weight:500;font-size:11px;color:#7d9397;text-align:right;padding:8px 10px;border-bottom:1px solid #dbe8e7}
+.price-table td{text-align:right;padding:8px 10px;border-bottom:1px solid #edf3f3;font-family:'DM Mono',monospace;color:#36555c}
+.price-table th:first-child,.price-table td:first-child{text-align:left;font-family:inherit}
+.price-table tr.has-curve td:first-child{font-weight:600;color:#1f5f62}
+.price-table .bar-col{width:38%}
+.price-table td.bar-col>div{display:flex;align-items:center;gap:10px}
+.price-table td.bar-col b{font-weight:500;min-width:52px}
+.price-bar{flex:1;height:6px;background:#eef4f4;border-radius:3px;overflow:hidden}
+.price-bar i{display:block;height:100%;background:#7fb5b2;border-radius:3px}
+.price-bar i.negative{background:#d39a8c}
+.price-source{font-size:11px;color:#9aabae;margin:4px 0 0}
+@media(max-width:900px){
+  .price-page{padding:92px 20px 40px}
+  .price-heading{flex-direction:column;align-items:stretch}
+  .price-heading-side{justify-content:space-between}
+  .price-stats{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:680px){
+  .price-page{padding:84px 16px 32px}
+  .price-heading h1{font-size:26px}
+  .price-heading-side{flex-direction:column;align-items:stretch}
+  .price-token{max-width:none}
+  .price-card{padding:16px 14px}
+  .price-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .price-stats dd{font-size:18px}
+  .price-legend em{display:none}
+  .price-chart-x span.minor{display:none}
+  .price-chart{--chart-h:220px;grid-template-columns:36px minmax(0,1fr)}
+}
+@media(prefers-reduced-motion:reduce){.price-tabs button{transition:none}}
