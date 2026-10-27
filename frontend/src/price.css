@@ -15,9 +15,9 @@
 .price-token-expired strong,.price-token-missing strong{color:#a54f43}
 .price-token-error .price-token-dot{background:#c6904c}
 .price-card{border:1px solid #d0e0e0;border-radius:10px;background:rgba(250,253,252,.92);padding:20px 22px;margin-bottom:20px}
-.price-tabs{display:flex;gap:6px;border-bottom:1px solid #e1ecec;margin:-4px -4px 18px;padding:0 0 12px;overflow-x:auto;scrollbar-width:none}
+.price-tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid #e1ecec;margin:-4px -4px 18px;padding:0 0 12px}
 .price-tabs::-webkit-scrollbar{display:none}
-.price-tabs button{flex:0 0 auto;border:0;background:transparent;border-radius:6px;padding:7px 14px;cursor:pointer;text-align:left;color:#5f7d82}
+.price-tabs button{flex:0 0 auto;border:0;background:transparent;border-radius:6px;padding:6px 10px;min-width:64px;cursor:pointer;text-align:left;color:#5f7d82}
 .price-tabs button:hover{background:#eef6f5}
 .price-tabs button.active{background:#e3f1ef;color:#1f5f62}
 .price-tabs strong{display:block;font-size:13px;font-weight:600}
@@ -80,6 +80,7 @@
   .price-heading-side{flex-direction:column;align-items:stretch}
   .price-token{max-width:none}
   .price-card{padding:16px 14px}
+  .price-tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
   .price-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
   .price-stats dd{font-size:18px}
   .price-legend em{display:none}

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from . import store
-from .fetcher import AREAS, TokenExpired, UpstreamError, fetch_once, mark_token, validate
+from .fetcher import TokenExpired, UpstreamError, areas, fetch_once, mark_token, validate
 
 router = APIRouter(prefix='/api/price')
 DATE = r'^\d{4}-\d{2}-\d{2}$'
@@ -103,14 +103,17 @@ def day(date: str = Query('', pattern=r'^$|' + DATE)):
     curves = {}
     for r in rows:
         curves.setdefault(r['area_code'], []).append(r)
+    names = {a['code']: a['name'] for a in areas()}
     provinces = []
-    for area in AREAS:
-        slots = curves.get(area['code'])
-        if not slots:
-            continue
-        provinces.append({'area_code': area['code'], 'name': area['name'], 'basis': area['basis'], 'points': len(slots),
+    for code in sorted(curves, key=lambda c: (c not in names, c)):
+        slots = curves[code]
+        basis = 'start' if any(s['raw_time'] == '00:00' for s in slots) else 'end'
+        starts = [0] + [s['slot_end'] for s in slots[:-1]]
+        provinces.append({'area_code': code, 'name': names.get(code, code), 'basis': basis, 'points': len(slots),
+                          'resolution': sorted({s['slot_end'] - b for s, b in zip(slots, starts)}),
                           'fetched_at': max(s['fetched_at'] for s in slots),
-                          'slots': [{'end': s['slot_end'], 'label': clock(s['slot_end']), 'day_ahead': s['day_ahead'], 'real_time': s['real_time']} for s in slots]})
+                          'slots': [{'start': b, 'end': s['slot_end'], 'label': clock(s['slot_end']), 'day_ahead': s['day_ahead'], 'real_time': s['real_time']}
+                                    for s, b in zip(slots, starts)]})
     merged = {}
     for r in average_rows:
         item = merged.setdefault(r['area_code'], {'area_code': r['area_code'], 'area_name': r['area_name'], 'day_ahead': None, 'real_time': None,

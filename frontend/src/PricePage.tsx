@@ -3,8 +3,8 @@ import type {PointerEvent} from 'react';
 import './price.css';
 import {fetchJson} from './net';
 
-type Slot={end:number;label:string;day_ahead:number|null;real_time:number|null};
-type Province={area_code:string;name:string;basis:'end'|'start';points:number;fetched_at:string;slots:Slot[]};
+type Slot={start:number;end:number;label:string;day_ahead:number|null;real_time:number|null};
+type Province={area_code:string;name:string;basis:'end'|'start';points:number;resolution:number[];fetched_at:string;slots:Slot[]};
 type Average={area_code:string;area_name:string;day_ahead:number|null;real_time:number|null;solar_mechanism_price:number|null;wind_mechanism_price:number|null};
 type Day={date:string;is_today:boolean;provinces:Province[];averages:Average[]};
 type Status={state:'valid'|'expired'|'missing'|'error'|'unchecked';message:string;checked_at:string|null;token_updated_at:string|null;issued_at:string|null;estimated_expire_at:string|null;last_data_at:string|null;next_run_at:string|null};
@@ -15,7 +15,9 @@ const STATE_TEXT:Record<Status['state'],string>={valid:'数据源正常',expired
 const price=(v:number|null|undefined)=>v==null?'—':v.toFixed(1);
 const clock=(iso:string|null|undefined)=>iso?new Intl.DateTimeFormat('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Asia/Shanghai'}).format(new Date(iso)):'—';
 const dayName=(s:string)=>new Intl.DateTimeFormat('zh-CN',{month:'numeric',day:'numeric',weekday:'short',timeZone:'Asia/Shanghai'}).format(new Date(`${s}T00:00:00+08:00`));
-const mean=(values:(number|null)[])=>{const v=values.filter((x):x is number=>x!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;};
+// 按时段时长加权：重庆等省份 5 分钟和 15 分钟的点混在一起，简单平均会偏向 5 分钟时段。
+const mean=(slots:Slot[],key:'day_ahead'|'real_time')=>{let sum=0,weight=0;for(const s of slots){const v=s[key];if(v==null)continue;sum+=v*(s.end-s.start);weight+=s.end-s.start;}return weight?sum/weight:null;};
+const DEFAULT_AREA='320000000000';
 
 function niceTicks(lo:number,hi:number,count=5){
   const raw=(hi-lo)/count,unit=10**Math.floor(Math.log10(Math.max(raw,1e-6)));
@@ -38,7 +40,6 @@ function PriceChart({province}:{province:Province}){
   const path=(key:'day_ahead'|'real_time')=>{let d='',open=false;for(const s of slots){const v=s[key];if(v==null){open=false;continue;}d+=`${open?'L':'M'}${x(s.end).toFixed(2)},${y(v).toFixed(2)} `;open=true;}return d.trim();};
   const pick=(event:PointerEvent<HTMLDivElement>)=>{const rect=event.currentTarget.getBoundingClientRect();const minute=(event.clientX-rect.left)/rect.width*1440;let best=0;slots.forEach((s,i)=>{if(Math.abs(s.end-minute)<Math.abs(slots[best].end-minute))best=i;});setHover(best);};
   const active=hover==null?null:slots[hover];
-  const start=active?active.end-1440/province.points:0;
   return <div className="price-chart">
     <div className="price-chart-y">{ticks.map(t=><span key={t} style={{top:`${y(t)}%`}}>{t}</span>)}</div>
     <div className="price-chart-plot" onPointerMove={pick} onPointerDown={pick} onPointerLeave={()=>setHover(null)}>
@@ -50,7 +51,7 @@ function PriceChart({province}:{province:Province}){
       {active&&<>
         <span className="price-guide" style={{left:`${x(active.end)}%`}}/>
         <div className="price-tip" style={{left:`${x(active.end)}%`,transform:`translateX(${x(active.end)>75?'-100%':x(active.end)<25?'0':'-50%'})`}}>
-          <strong>{String(Math.floor(start/60)).padStart(2,'0')}:{String(start%60).padStart(2,'0')}–{active.label}</strong>
+          <strong>{String(Math.floor(active.start/60)).padStart(2,'0')}:{String(active.start%60).padStart(2,'0')}–{active.label}</strong>
           <span><i style={{background:COLORS.day_ahead}}/>日前 {price(active.day_ahead)}</span>
           <span><i style={{background:COLORS.real_time}}/>实时 {price(active.real_time)}</span>
         </div>
@@ -61,18 +62,17 @@ function PriceChart({province}:{province:Province}){
 }
 
 function Stats({province}:{province:Province}){
-  const da=province.slots.map(s=>s.day_ahead),rt=province.slots.map(s=>s.real_time);
   const known=province.slots.filter(s=>s.day_ahead!=null);
   const max=known.reduce<Slot|null>((a,s)=>!a||s.day_ahead!>a.day_ahead!?s:a,null);
   const min=known.reduce<Slot|null>((a,s)=>!a||s.day_ahead!<a.day_ahead!?s:a,null);
-  const negative=known.filter(s=>s.day_ahead!<0).length;
-  const rtCount=rt.filter(v=>v!=null).length;
+  const negative=known.filter(s=>s.day_ahead!<0).reduce((a,s)=>a+s.end-s.start,0)/60;
+  const rtCount=province.slots.filter(s=>s.real_time!=null).length;
   return <dl className="price-stats">
-    <div><dt>日前均价</dt><dd>{price(mean(da))}</dd></div>
-    <div><dt>实时均价</dt><dd>{price(mean(rt))}{rtCount>0&&rtCount<province.points&&<small>{rtCount}/{province.points} 点</small>}</dd></div>
+    <div><dt>日前均价</dt><dd>{price(mean(province.slots,'day_ahead'))}</dd></div>
+    <div><dt>实时均价</dt><dd>{price(mean(province.slots,'real_time'))}{rtCount>0&&rtCount<province.points&&<small>{rtCount}/{province.points} 点</small>}</dd></div>
     <div><dt>日前最高</dt><dd>{price(max?.day_ahead)}<small>{max?.label}</small></dd></div>
     <div><dt>日前最低</dt><dd className={min&&min.day_ahead!<0?'negative':''}>{price(min?.day_ahead)}<small>{min?.label}</small></dd></div>
-    <div><dt>负价时段</dt><dd>{negative}<small>/ {province.points}</small></dd></div>
+    <div><dt>日前负价时长</dt><dd>{negative%1?negative.toFixed(2):negative}<small>小时</small></dd></div>
   </dl>;
 }
 
@@ -85,7 +85,7 @@ export default function PricePage(){
     fetchJson<{items:DateItem[]}>('/api/price/dates',{signal:abort.signal}).then(v=>setDates(v.items)).catch(()=>{});
     return()=>abort.abort();},[tick]);
   useEffect(()=>{const abort=new AbortController();setLoading(true);setError('');
-    fetchJson<Day>('/api/price/day'+(date?`?date=${date}`:''),{signal:abort.signal}).then(v=>{setDay(v);setArea(a=>v.provinces.some(p=>p.area_code===a)?a:v.provinces[0]?.area_code??'');})
+    fetchJson<Day>('/api/price/day'+(date?`?date=${date}`:''),{signal:abort.signal}).then(v=>{setDay(v);setArea(a=>[a,DEFAULT_AREA].find(c=>v.provinces.some(p=>p.area_code===c))??v.provinces[0]?.area_code??'');})
       .catch(e=>{if(!abort.signal.aborted)setError(e.message);}).finally(()=>{if(!abort.signal.aborted)setLoading(false);});
     return()=>abort.abort();},[date,tick]);
   const province=day?.provinces.find(p=>p.area_code===area);
@@ -98,7 +98,7 @@ export default function PricePage(){
       <div>
         <div className="price-eyebrow">电力现货</div>
         <h1>现货出清电价</h1>
-        <p>日前与实时出清价，单位元/MWh。每小时自动拉取，按日保存。</p>
+        <p>日前与实时出清价，单位元/MWh。全天定时拉取，按日保存。</p>
       </div>
       <div className="price-heading-side">
         {status&&<div className={`price-token price-token-${status.state}`} title={status.message||undefined}>
@@ -117,13 +117,13 @@ export default function PricePage(){
     {error?<div className="price-empty">{error}</div>:!day&&loading?<div className="price-empty">读取中…</div>:day&&<>
       {day.provinces.length?<section className="price-card">
         <div className="price-tabs" role="tablist">{day.provinces.map(p=><button key={p.area_code} role="tab" aria-selected={p.area_code===area} className={p.area_code===area?'active':''} onClick={()=>setArea(p.area_code)}>
-          <strong>{p.name}</strong><span>{price(mean(p.slots.map(s=>s.day_ahead)))}</span></button>)}</div>
+          <strong>{p.name}</strong><span>{price(mean(p.slots,'day_ahead')??mean(p.slots,'real_time'))}</span></button>)}</div>
         {province&&<>
           <Stats province={province}/>
           <div className="price-legend"><span><i style={{background:COLORS.day_ahead}}/>日前</span><span><i style={{background:COLORS.real_time}}/>实时</span>
-            <em>{province.points} 点 · 原始时刻为时段{province.basis==='start'?'开始，已换算为结束':'结束'} · 拉取于 {clock(province.fetched_at)}</em></div>
+            <em>{province.points} 点，{province.resolution.join('/')} 分钟一个点 · 原始时刻为时段{province.basis==='start'?'开始，已换算为结束':'结束'} · 拉取于 {clock(province.fetched_at)}</em></div>
           <PriceChart province={province}/>
-          {day.is_today&&<p className="price-note">当天实时价可能含预出清值，以 23:50 最后一次拉取为准。</p>}
+          {day.is_today&&<p className="price-note">当天实时价可能含预出清值，以晚间最后一次拉取为准。</p>}
         </>}
       </section>:<div className="price-empty">{dayName(day.date)}没有分时曲线。{status?.state!=='valid'&&'token 失效或未配置时无法拉取，'}明细接口只能查当天，错过的日期无法补齐。</div>}
 
