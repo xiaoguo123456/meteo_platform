@@ -5,9 +5,9 @@ export function geometry(model:string,scale=1){
  // 半分辨率由后端平滑后取原网格偶数位置，起点不变，间距加倍。
  return scale===1?full:{...full,width:Math.ceil(full.width/scale),height:Math.ceil(full.height/scale),dx:full.dx*scale,dy:full.dy*scale};
 }
-// 半分辨率格距在地球正中投影到屏幕上不超过 4 个 CSS 像素时改用半分辨率：
+// 半分辨率格距在地球正中投影到屏幕上不超过 5 个 CSS 像素时改用半分辨率：
 // 渲染本身每 2 像素采样一次并双线性插值，此时画面差别很小，单帧体积约为三分之一；放大后自动换回原分辨率。
-const HALF_RES_MAX_PX=4;
+const HALF_RES_MAX_PX=5;
 export function tileScale(model:string,view:Viewport){return view.radius*Math.PI/180*geometry(model,2).dx<=HALF_RES_MAX_PX?2:1;}
 export function visibleTiles(model:string,view:Viewport,scale=1):number[]{
  const m=geometry(model,scale),columns=Math.ceil(m.width/TILE_SIZE),radians=Math.PI/180;
