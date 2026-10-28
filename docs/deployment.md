@@ -71,7 +71,7 @@ curl http://127.0.0.1:8091/api/models/gfs/runs
 
 各模型都有海平面气压。预报长度和间隔以 S3 的 `latest.json` 为准。降水第 0 时效缺失时不补零，时间轴只列该要素实际有的时刻。
 
-`/api/models/{model}/runs` 浏览器不缓存（前端 `no-store`），Cloudflare 边缘缓存 5 秒 + `stale-while-revalidate=30`，前端每 10 秒轮询。所选批次已被清理时，前端重读清单并重试一次。
+`/api/models/{model}/runs` 浏览器不缓存（前端 `no-store`），前端每 10 秒轮询。后端仍下发 Cloudflare 边缘缓存头（5 秒 + `stale-while-revalidate=30`），目前不经 Cloudflare，这些头不起作用。所选批次已被清理时，前端重读清单并重试一次。
 
 ## 底图
 
@@ -79,10 +79,15 @@ curl http://127.0.0.1:8091/api/models/gfs/runs
 
 ## 国内访问慢
 
-国内访问经 Cloudflare 洛杉矶节点回源，瓶颈在跨境线路。前端 `frontend/src/net.ts` 的处理：
+域名直接解析到服务器 `49.51.229.109`，不经 Cloudflare（响应头 `server: nginx`，无 `cf-ray`）。瓶颈在跨境线路：服务器空闲时国内下载仍可能只有十几 KB/s，原因是线路丢包（约 2–3%）。服务器端的处理：
 
-- JSON 请求限时 12 秒，网络类失败（超时、断开、408/429/5xx、Cloudflare 520–524）按 0.8 秒、2.5 秒退避重试；后端业务错误（503 + detail）不重试。
+- 启用 BBR 拥塞控制（`/etc/sysctl.d/99-bbr.conf` 与 `/etc/modules-load.d/bbr.conf`，手动配置，部署不管）。默认的 cubic 遇到丢包会把发送窗口压到个位数。
+- Nginx 压缩 JS、CSS、JSON、GeoJSON、SVG（`qingchuan-site.conf`）；`/api/` 关闭 Nginx 压缩，由后端自行 gzip，数据块流保持逐块到达。
+
+前端 `frontend/src/net.ts` 的处理：
+
+- JSON 请求限时 12 秒，网络类失败（超时、断开、408/429/5xx，含接入 Cloudflare 时的 520–524）按 0.8 秒、2.5 秒退避重试；后端业务错误（503 + detail）不重试。
 - 数据块流 20 秒没有新数据视为卡住，只补请求未到的块，最多重试两次。
 - 已有画面时，加载失败只在左上角温和提示并自动重试，不清空画面；单点面板失败给出「重试」按钮。
 
-进一步改善：换香港/日本服务器，或备案后用国内 CDN；也可在 Cloudflare 把 `/api/tiles/*`、`/api/provinces/shapes`、`/api/province-map/*`（内容固定）设为可缓存。
+进一步改善：换香港/日本服务器，或备案后用国内 CDN。若重新接入 Cloudflare，可把 `/api/tiles/*`、`/api/provinces/shapes`、`/api/province-map/*`（内容固定）设为可缓存。
