@@ -20,10 +20,21 @@ def simplify(points, tolerance=0.003):
     return [points[i] for i in sorted(keep)]
 
 
+def round_line(points, digits=3):
+    # 简化容差 0.003 度，坐标保留 3 位小数（约 100 米）已足够，文件体积减半以上；去掉取整后重合的相邻点。
+    # 小于 100 米的微小岛屿取整后会缩成一个点，这类线段保留原坐标，不丢弃。
+    line=[]
+    for x,y in points:
+        point=[round(x,digits),round(y,digits)]
+        if not line or line[-1]!=point:line.append(point)
+    return line if len(line)>1 else points
+
+
 def convert(source):
     features=[];coords=[];props={};original=0
     def flush():
-        if len(coords)>1:features.append({'type':'Feature','properties':dict(props),'geometry':{'type':'LineString','coordinates':simplify(coords)}})
+        line=round_line(simplify(coords)) if len(coords)>1 else []
+        if len(line)>1:features.append({'type':'Feature','properties':dict(props),'geometry':{'type':'LineString','coordinates':line}})
     for line in source.splitlines():
         if line.startswith('>'):
             flush();coords=[];props={}

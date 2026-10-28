@@ -1,7 +1,7 @@
 .price-page{max-width:1180px;margin:0 auto;padding:112px 40px 56px;color:#243f49}
 .price-heading{display:flex;justify-content:space-between;align-items:end;gap:24px;margin-bottom:24px}
 .price-eyebrow{font-size:11px;letter-spacing:.18em;color:#5c8388}
-.price-heading h1{font:600 34px/1.25 'Noto Serif SC',serif;letter-spacing:.04em;margin:8px 0}
+.price-heading h1{font:600 34px/1.25 "Noto Serif SC","Source Han Serif SC","Noto Serif CJK SC","Songti SC",STSong,SimSun,serif;letter-spacing:.04em;margin:8px 0}
 .price-heading p{color:#748b90;font-size:13px;margin:0}
 .price-heading-side{display:flex;align-items:stretch;gap:12px}
 .price-date{position:relative;display:flex;align-items:stretch;min-height:42px;border:1px solid #d0e0e0;border-radius:8px;background:rgba(250,253,252,.9)}
@@ -72,7 +72,7 @@
 .price-empty{border:1px dashed #d0e0e0;border-radius:10px;margin-bottom:20px;line-height:1.8}
 .price-note{margin:14px 0 0;font-size:11px;color:#8ea2a6}
 .price-section-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px}
-.price-section-head h2{font:600 17px 'Noto Serif SC',serif;margin:0}
+.price-section-head h2{font:600 17px "Noto Serif SC","Source Han Serif SC","Noto Serif CJK SC","Songti SC",STSong,SimSun,serif;margin:0}
 .price-section-head span{font-size:11px;color:#8ea2a6}
 .price-table-wrap{overflow-x:auto}
 .price-table{width:100%;border-collapse:collapse;font-size:12px;min-width:560px}

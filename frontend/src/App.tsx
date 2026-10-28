@@ -2,18 +2,19 @@ import NewsPage from './NewsPage';
 import StationForecast from './StationForecast';
 import {SatelliteObservationPanel, SatelliteOrbitPanel, warmSatellite, type SatelliteDetail, type SatelliteSummary} from './SatellitePanel';
 import type {EarthTexture} from './basemap';
-import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import PointForecast, { type ProvinceOutline } from './PointForecast';
-import PowerOutlook from './PowerOutlook';
 import PricePage from './PricePage';
 import WeatherGlobe from './WeatherGlobe';
 import type { ProvinceShapes, SatelliteOverlay } from './WeatherGlobe';
 import { ESRI_CREDIT } from './basemap';
-import { cancelPendingFrames, ForecastRunExpiredError, loadFrame } from './frameLoader';
+import { cancelPendingFrames, ForecastRunExpiredError, loadFrame, slowLink } from './frameLoader';
 import type { Viewport } from './viewTiles';
 import { buildShare, nearestTime, parseShare } from './share';
 import { fetchJson, isNetworkSlow } from './net';
 import { fieldColor, fields, type Grid } from './windMath';
+// 新能源页带地图库（约 1 MB），单独打包，进入该页时才下载。
+const PowerOutlook=lazy(()=>import('./PowerOutlook'));
 
 type Batch={model:string;run_time:string|null;times:string[];field_times?:Record<string,string[]>;total:number;state:string;error:string|null;pending_run_time?:string|null;pending_cached?:number;pending_total?:number;pending_state?:string;pending_error?:string|null};
 type SatelliteMode='observation'|'orbit'|false;
@@ -143,9 +144,11 @@ function WeatherApp({satelliteMode}:{satelliteMode:SatelliteMode}) {
   if(satelliteMode||!viewport||loading||!run||!grid||!grid.meta.complete||grid.meta.model!==model||grid.meta.field!==field||grid.meta.run_time!==run||grid.meta.valid_time!==valid)return;
   let active=true;
   const timer=setTimeout(()=>{void(async()=>{
-   const ahead=times.slice(index+1,index+7).map(time=>({field,time}));
+   // 网速慢（或用户开了省流量）时只预取紧接着的一两帧，不预取其他要素，免得后台下载挤占当前画面。
+   const slow=slowLink();
+   const ahead=times.slice(index+1,index+1+(slow?(playing?2:1):6)).map(time=>({field,time}));
    // 静止浏览时提前备好其他要素的首帧；播放时把带宽留给后续时刻。
-   const alternatives=playing?[]:availableFields.filter(id=>id!==field).map(id=>({field:id,time:activeBatch?.field_times?.[id]?.[0]})).filter(item=>item.time);
+   const alternatives=playing||slow?[]:availableFields.filter(id=>id!==field).map(id=>({field:id,time:activeBatch?.field_times?.[id]?.[0]})).filter(item=>item.time);
    const queue=[...ahead.slice(0,1),...alternatives,...ahead.slice(1)];
    let cursor=0;
    const consume=async()=>{while(active&&cursor<queue.length){
@@ -224,5 +227,5 @@ export default function App(){
  useEffect(()=>{const changed=()=>{if(location.hash.startsWith('#home?'))setHomeKey(k=>k+1);setMode(getMode());};addEventListener('hashchange',changed);return()=>removeEventListener('hashchange',changed);},[]);
  // 窄屏导航横向滚动，当前栏目要滚进可视范围。
  useEffect(()=>{document.querySelector('.topbar .nav-item-active')?.scrollIntoView({block:'nearest',inline:'nearest'});},[mode]);
- return <><header className="topbar"><span className="brand-name">晴川观象</span><nav aria-label="主导航">{[['home','首页'],['observation','葵花卫星'],['satellite','卫星轨迹'],['station','站点预测'],['outlook','新能源态势'],['price','电价'],['news','资讯']].map(([id,title])=><button key={id} className={`nav-item ${mode===id?'nav-item-active':''}`} onClick={()=>{location.hash=id==='home'?'':id;setMode(id);}}>{title}</button>)}</nav></header>{mode==='news'?<NewsPage/>:mode==='price'?<PricePage/>:mode==='outlook'?<PowerOutlook/>:mode==='station'?<StationForecast/>:<WeatherApp key={homeKey} satelliteMode={mode==='satellite'?'orbit':mode==='observation'?'observation':false}/>}</>;
+ return <><header className="topbar"><span className="brand-name">晴川观象</span><nav aria-label="主导航">{[['home','首页'],['observation','葵花卫星'],['satellite','卫星轨迹'],['station','站点预测'],['outlook','新能源态势'],['price','电价'],['news','资讯']].map(([id,title])=><button key={id} className={`nav-item ${mode===id?'nav-item-active':''}`} onClick={()=>{location.hash=id==='home'?'':id;setMode(id);}}>{title}</button>)}</nav></header>{mode==='news'?<NewsPage/>:mode==='price'?<PricePage/>:mode==='outlook'?<Suspense fallback={null}><PowerOutlook/></Suspense>:mode==='station'?<StationForecast/>:<WeatherApp key={homeKey} satelliteMode={mode==='satellite'?'orbit':mode==='observation'?'observation':false}/>}</>;
 }

@@ -1,5 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Serif+SC:wght@500;600;700&display=swap");
-
 :root { color:#243f49; background:#edf3f3; font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; font-synthesis:none; text-rendering:optimizeLegibility; }
 * { box-sizing:border-box; }
 body { margin:0; min-width:320px; min-height:100dvh; }
@@ -10,7 +8,7 @@ button:focus-visible { outline:2px solid #367a80; outline-offset:5px; border-rad
 .weather-workspace { position:relative; height:100dvh; overflow:hidden; background:radial-gradient(ellipse at 52% 42%,#fafcfb 0%,#edf3f3 65%,#e3ecee 100%); }
 .topbar { position:absolute; top:0; left:0; right:0; height:76px; display:flex; align-items:center; gap:48px; padding:0 29px; z-index:8; pointer-events:none; }
 .topbar button { pointer-events:auto; }
-.brand-name { color:#264d55; font-family:"Noto Serif SC",serif; font-size:25px; font-weight:700; letter-spacing:.12em; white-space:nowrap; }
+.brand-name { color:#264d55; font-family:"Noto Serif SC","Source Han Serif SC","Noto Serif CJK SC","Songti SC",STSong,SimSun,serif; font-size:25px; font-weight:700; letter-spacing:.12em; white-space:nowrap; }
 .nav-item { position:relative; padding:8px 0; color:#6d858a; background:transparent; font-size:14px; letter-spacing:.04em; cursor:pointer; transition:color .15s; }
 .nav-item:hover { color:#2c5a61; }
 .nav-item:focus-visible { outline:2px solid #7da6ab; outline-offset:4px; border-radius:2px; }
@@ -88,7 +86,7 @@ button:focus-visible { outline:2px solid #367a80; outline-offset:5px; border-rad
 .satellite-list-item.active .satellite-dot{background:#d97745;box-shadow:0 0 0 2px #d9774524;}
 .satellite-detail{margin:0 0 12px;padding:11px 11px 9px;border:1px solid #c8dcdb;border-radius:7px;background:rgba(244,250,249,.9);}
 .satellite-detail-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
-.satellite-detail h3{margin:0;color:#254c55;font-family:"Noto Serif SC",serif;font-size:17px;}
+.satellite-detail h3{margin:0;color:#254c55;font-family:"Noto Serif SC","Source Han Serif SC","Noto Serif CJK SC","Songti SC",STSong,SimSun,serif;font-size:17px;}
 .satellite-category{max-width:105px;color:#bd6d45;font-size:10px;text-align:right;line-height:1.4;}
 .satellite-summary{margin:8px 0 10px;color:#547079;font-size:11px;line-height:1.6;}
 .satellite-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:8px 0;border-top:1px solid #d8e5e4;border-bottom:1px solid #d8e5e4;color:#759097;font-size:9px;}

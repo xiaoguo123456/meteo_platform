@@ -31,6 +31,11 @@ function remember(key:string,tile:Grid){
  if(tileCache.has(key))return;tileCache.set(key,tile);cachedBytes+=tile.u.byteLength+tile.v.byteLength;
  while(cachedBytes>budget){const first=tileCache.keys().next().value!;const item=tileCache.get(first)!;cachedBytes-=item.u.byteLength+item.v.byteLength;tileCache.delete(first);}
 }
+// 前台数据块的实测下载速度（字节/秒，0 为尚未测到）。一帧约 1 MB，低于 250 KB/s 时单帧要四秒以上，
+// 预取应让路给当前画面；HTTP 缓存命中耗时极短，不计入。
+const SLOW_BYTES_PER_SECOND=250*1024;
+let throughput=0;
+export const slowLink=()=>(navigator as Navigator&{connection?:{saveData?:boolean}}).connection?.saveData===true||(throughput>0&&throughput<SLOW_BYTES_PER_SECOND);
 export function cancelPendingFrames(){
  for(const [key,entry] of frames)if(entry.pending){entry.controller.abort();frames.delete(key);}
 }
@@ -53,6 +58,7 @@ export function loadFrame(model:string,field:string,run:string,time:string,view:
     arm();
     // 运行批次由状态接口动态轮换，数据块 URL 已包含 run/time，
     // 同一时次可以安全复用浏览器和 Cloudflare 的缓存。
+    const started=performance.now();let received=0;
     const response=await fetch(`/api/tiles/${model}?${query}`,{signal:request.signal,cache:'default',priority:background?'low':'high'} as RequestInit);
     if(!response.ok){
      const body=await response.text();let detail='';try{detail=JSON.parse(body).detail||'';}catch{}
@@ -61,7 +67,7 @@ export function loadFrame(model:string,field:string,run:string,time:string,view:
     }
     const reader=response.body!.getReader();let pending=new Uint8Array(0),last=0;
     try{while(true){
-     const result=await reader.read();if(result.done)break;arm();
+     const result=await reader.read();if(result.done)break;arm();received+=result.value.length;
      const combined=new Uint8Array(pending.length+result.value.length);combined.set(pending);combined.set(result.value,pending.length);pending=combined;
      while(pending.length>=4){
       const length=new DataView(pending.buffer,pending.byteOffset,4).getUint32(0,true);if(pending.length<length+4)break;
@@ -72,6 +78,8 @@ export function loadFrame(model:string,field:string,run:string,time:string,view:
      }
     }}finally{reader.releaseLock();}
     if(pending.length||missing.some(id=>!sparse.tiles![id]))throw new RequestError('预报数据块传输不完整',0);
+    const seconds=(performance.now()-started)/1000;
+    if(!background&&received>=128*1024&&seconds>.1){const rate=received/seconds;throughput=throughput?throughput*.5+rate*.5:rate;}
    }catch(error){
     if(controller.signal.aborted)throw new DOMException('请求已取消','AbortError');
     if(error instanceof ForecastRunExpiredError)throw error;
