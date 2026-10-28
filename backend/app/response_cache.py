@@ -10,8 +10,9 @@ from .spatial_provider import FIELDS, model_fields
 
 LOCKS = [threading.Lock() for _ in range(64)]
 PREPARE = threading.Semaphore(1)
-# 浏览器数据块齐备标记；新增要素时升级版本，旧批次据此从本地 NPZ 补生成。
-WIRE_MARKER = 'wire-v5'
+# 浏览器数据块齐备标记；新增要素或数据块规格时升级版本，旧批次据此从本地 NPZ 补生成。
+# v6：新增缩小视图用的半分辨率数据块。
+WIRE_MARKER = 'wire-v6'
 
 
 def pack_grid(native, model, field):
@@ -70,4 +71,5 @@ def prepare_snapshot(folder, index, model, native):
             if field == 'wind' or field in native['arrays'] and np.isfinite(native['arrays'][field]).any():
                 from .tile_cache import prepare_tiles
                 prepare_tiles(folder, index, model, field, native)
+                prepare_tiles(folder, index, model, field, native, scale=2)
         (folder / f'{index}.{WIRE_MARKER}').touch()

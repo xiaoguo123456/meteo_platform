@@ -22,7 +22,7 @@ export function decodeFrame(buffer:ArrayBuffer):Grid{
  return {meta,u:values.subarray(0,count),v:channels===2?values.subarray(count):new Float32Array(count)};
 }
 
-import { geometry, visibleTiles, TILE_SIZE, type Viewport } from './viewTiles';
+import { geometry, tileScale, visibleTiles, TILE_SIZE, type Viewport } from './viewTiles';
 type Entry={promise:Promise<Grid>;controller:AbortController;pending:boolean;background:boolean};
 const tileCache=new Map<string,Grid>(),frames=new Map<string,Entry>();
 let cachedBytes=0;
@@ -40,18 +40,18 @@ export function cancelPendingFrames(){
  for(const [key,entry] of frames)if(entry.pending){entry.controller.abort();frames.delete(key);}
 }
 export function loadFrame(model:string,field:string,run:string,time:string,view:Viewport,background=false,onProgress?:(grid:Grid)=>void):Promise<Grid>{
- const ids=visibleTiles(model,view),prefix=[model,field,run,time].join('/'),key=prefix+'/'+[...ids].sort((a,b)=>a-b).join(',');
+ const scale=tileScale(model,view),ids=visibleTiles(model,view,scale),prefix=[model+(scale===1?'':'@'+scale),field,run,time].join('/'),key=prefix+'/'+[...ids].sort((a,b)=>a-b).join(',');
  if(!background)for(const [url,entry] of frames)if(url!==key&&entry.pending&&!entry.background){entry.controller.abort();frames.delete(url);}
  const existing=frames.get(key);if(existing){existing.background=background;frames.delete(key);frames.set(key,existing);return existing.promise;}
  const controller=new AbortController(),entry:Entry={controller,pending:true,background,promise:Promise.resolve(null as unknown as Grid)};
  entry.promise=(async()=>{
-  const sparse:Grid={meta:{...geometry(model),run_time:run,valid_time:time,model,field,level:''},u:new Float32Array(),v:new Float32Array(),tiles:{}};
+  const sparse:Grid={meta:{...geometry(model,scale),run_time:run,valid_time:time,model,field,level:''},u:new Float32Array(),v:new Float32Array(),tiles:{}};
   const add=(tile:Grid)=>{const m=tile.meta as Grid['meta']&{tile_x:number;tile_y:number;full_width:number;full_height:number};sparse.meta={...m,width:m.full_width,height:m.full_height};const id=m.tile_y/TILE_SIZE*Math.ceil(m.full_width/TILE_SIZE)+m.tile_x/TILE_SIZE;sparse.tiles![id]={width:m.width,u:tile.u,v:tile.v};remember(prefix+'/'+id,tile);};
   const missing:number[]=[];for(const id of ids){const tile=tileCache.get(prefix+'/'+id);if(tile)add(tile);else missing.push(id);}
   // 分块流式下载：20 秒没有新数据视为卡住，中止后只补请求尚未到达的数据块；网络类失败最多重试两次。
   for(let attempt=0;missing.some(id=>!sparse.tiles![id]);attempt++){
    const remaining=missing.filter(id=>!sparse.tiles![id]);
-   const query=new URLSearchParams({field,run_time:run,valid_time:time,tiles:remaining.join(','),version:'4'});
+   const query=new URLSearchParams({field,run_time:run,valid_time:time,tiles:remaining.join(','),version:'4',...(scale===1?{}:{scale:String(scale)})});
    const request=new AbortController(),forward=()=>request.abort();controller.signal.addEventListener('abort',forward,{once:true});
    let stalled=false,watchdog:ReturnType<typeof setTimeout>|undefined;const arm=()=>{clearTimeout(watchdog);watchdog=setTimeout(()=>{stalled=true;request.abort();},STALL_MS);};
    try{

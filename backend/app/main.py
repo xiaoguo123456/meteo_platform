@@ -347,12 +347,12 @@ def province_boundaries():
                         headers={'Cache-Control':'public, max-age=86400'})
 
 @app.get('/api/tiles/{model_id}')
-async def native_tiles(model_id: str, field: str, run_time: str, valid_time: str, tiles: str, version: int = 3):
+async def native_tiles(model_id: str, field: str, run_time: str, valid_time: str, tiles: str, version: int = 3, scale: int = 1):
     from .tile_cache import cached_tiles
     from fastapi.responses import StreamingResponse
     try:
         ids = [int(value) for value in tiles.split(',')]
-        stream, length = await asyncio.to_thread(cached_tiles, model_id, field, run_time, valid_time, ids, version)
+        stream, length = await asyncio.to_thread(cached_tiles, model_id, field, run_time, valid_time, ids, version, scale)
         return StreamingResponse(stream, media_type='application/octet-stream', headers={
             'Content-Length': str(length), 'Cache-Control':'public, max-age=31536000, immutable',
             # 分块内部已 gzip，禁止中间件再次压缩，保持逐块到达。

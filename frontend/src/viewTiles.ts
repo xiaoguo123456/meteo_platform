@@ -1,8 +1,16 @@
 export type Viewport={width:number;height:number;radius:number;rotation:[number,number,number]};
 export const TILE_SIZE=128;
-export function geometry(model:string){return model==='grapes'?{width:2880,height:1440,lon0:-180,lat0:-89.9375,dx:.125,dy:.125}:{width:1440,height:721,lon0:-180,lat0:-90,dx:.25,dy:.25};}
-export function visibleTiles(model:string,view:Viewport):number[]{
- const m=geometry(model),columns=Math.ceil(m.width/TILE_SIZE),radians=Math.PI/180;
+export function geometry(model:string,scale=1){
+ const full=model==='grapes'?{width:2880,height:1440,lon0:-180,lat0:-89.9375,dx:.125,dy:.125}:{width:1440,height:721,lon0:-180,lat0:-90,dx:.25,dy:.25};
+ // 半分辨率由后端平滑后取原网格偶数位置，起点不变，间距加倍。
+ return scale===1?full:{...full,width:Math.ceil(full.width/scale),height:Math.ceil(full.height/scale),dx:full.dx*scale,dy:full.dy*scale};
+}
+// 半分辨率格距在地球正中投影到屏幕上不超过 4 个 CSS 像素时改用半分辨率：
+// 渲染本身每 2 像素采样一次并双线性插值，此时画面差别很小，单帧体积约为三分之一；放大后自动换回原分辨率。
+const HALF_RES_MAX_PX=4;
+export function tileScale(model:string,view:Viewport){return view.radius*Math.PI/180*geometry(model,2).dx<=HALF_RES_MAX_PX?2:1;}
+export function visibleTiles(model:string,view:Viewport,scale=1):number[]{
+ const m=geometry(model,scale),columns=Math.ceil(m.width/TILE_SIZE),radians=Math.PI/180;
  const lon=-view.rotation[0]*radians,lat=-view.rotation[1]*radians;
  const cap=Math.asin(Math.min(1,Math.hypot(view.width/2,view.height/2)/view.radius));
  const tiles:{id:number;distance:number}[]=[];
